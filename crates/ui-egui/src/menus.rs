@@ -1393,7 +1393,8 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
             }
             let mut text = translated_menu_label(lang, it);
             if let Some(c) = it.checked {
-                text = format!("{} {}", if c { "✔" } else { "  " }, text);
+                // Evora build (patch E10): U+2713, drawn by Inter, rather than the emoji-only U+2714.
+                text = format!("{} {}", if c { "✓" } else { "  " }, text);
             }
             let mut b = egui::Button::new(text);
             if let Some(tint) = it.color.as_deref().and_then(menu_tint) {

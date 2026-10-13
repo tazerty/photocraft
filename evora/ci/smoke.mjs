@@ -21,7 +21,8 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
-const [siteDir, cspFile, reportFile] = process.argv.slice(2);
+// Quatrième argument facultatif (E6) : le dossier des polices servies à part, superposé au site.
+const [siteDir, cspFile, reportFile, fontsDir] = process.argv.slice(2);
 const TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS || 120000);
 const SETTLE_MS = 3000;
 const CHROME = process.env.CHROME_BIN || 'google-chrome';
@@ -34,6 +35,10 @@ const STORAGE_NS = process.env.SMOKE_STORAGE_NS || '';
 // E5 : purge de l'espace de noms par evora:purge (témoins : message d'un autre espace de noms,
 // message venu du moteur lui-même ; puis le vrai message de la page parente).
 const PURGE = process.env.SMOKE_PURGE === '1';
+// E6 : langue du navigateur (navigator.languages), pour que le moteur charge les polices servies
+// de cette écriture, et exigence de polices servies (manifeste lu, au moins une police reçue).
+const BROWSER_LANG = process.env.SMOKE_BROWSER_LANG || '';
+const EXPECT_FONTS = process.env.SMOKE_EXPECT_FONTS === '1';
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -58,13 +63,14 @@ function listen(handler) {
 }
 
 function engineHandler(state) {
-  const root = path.resolve(siteDir);
+  const roots = [siteDir, fontsDir].filter(Boolean).map((d) => path.resolve(d));
   return (req, res) => {
     const url = new URL(req.url, 'http://x');
     let rel = decodeURIComponent(url.pathname);
     if (rel.endsWith('/')) rel += 'index.html';
-    const file = path.resolve(root, '.' + rel);
-    if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+    const file = roots.map((root) => path.resolve(root, '.' + rel))
+      .find((f, i) => f.startsWith(roots[i] + path.sep) && fs.existsSync(f) && fs.statSync(f).isFile());
+    if (!file) {
       state.notFound.push(rel);
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('not found');
@@ -200,7 +206,8 @@ async function main() {
     '--headless=new', '--no-sandbox', '--remote-debugging-pipe', `--user-data-dir=${profile}`,
     '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking',
     '--site-per-process', '--window-size=1400,900',
-    '--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist', 'about:blank',
+    '--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist',
+    ...(BROWSER_LANG ? [`--lang=${BROWSER_LANG}`, `--accept-lang=${BROWSER_LANG}`] : []), 'about:blank',
   ];
   const chrome = spawn(CHROME, args, { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
   let stderr = '';
@@ -355,6 +362,11 @@ async function main() {
       if (mine(pg.after).keys.length || mine(pg.after).dbs.length) problems.push(`purge incomplète : ${JSON.stringify(mine(pg.after))}`);
     }
   }
+  if (EXPECT_FONTS) {
+    const served = Object.keys(report.served);
+    if (!served.some((k) => k.startsWith('/fonts/manifest.txt '))) problems.push('manifeste des polices servies non lu');
+    if (!served.some((k) => /^\/fonts\/.+\.(ttf|otf|ttc) /.test(k))) problems.push(`aucune police servie reçue (langue du navigateur : ${BROWSER_LANG || 'défaut'})`);
+  }
   report.problems = problems;
   report.ok = problems.length === 0;
   if (!report.ok && stderr) report.chromeStderr = stderr.split('\n').slice(-40);
@@ -373,6 +385,7 @@ async function main() {
     `| Paramètres du moteur | \`?${QUERY}\` |`,
     `| Stockage (localStorage / IndexedDB) | ${report.storage ? `${report.storage.keys.join(', ') || 'aucune clé'} / ${(report.storage.dbs || []).join(', ') || 'aucune base'}` : '—'} |`,
     `| Purge evora:purge (témoin / après) | ${report.purge ? `${report.purge.witness.keys.length} clé(s), ${(report.purge.witness.dbs || []).length} base(s) / ${report.purge.after.keys.length} clé(s), ${(report.purge.after.dbs || []).length} base(s)` : '—'} |`,
+    `| Polices servies reçues | ${Object.keys(report.served).filter((k) => k.startsWith('/fonts/')).join(', ') || 'aucune'} |`,
     `| Thème des préférences | ${report.storage ? report.storage.theme ?? '—' : '—'}${EXPECT_THEME ? ` (attendu : ${EXPECT_THEME})` : ''} |`,
     `| Langue des préférences | ${report.storage ? report.storage.language ?? '—' : '—'}${EXPECT_LANG ? ` (attendue : ${EXPECT_LANG})` : ''} |`,
     `| Erreurs de page | ${report.errors.length} |`,

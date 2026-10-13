@@ -268,7 +268,9 @@ async function main() {
     const where = msg.sessionId && msg.sessionId === frameSession ? 'moteur' : 'parent';
     switch (msg.method) {
       case 'Target.attachedToTarget':
-        if (p.targetInfo.type === 'iframe' && !frameSession && (p.targetInfo.url || '').startsWith(engineOrigin)) {
+        // Seul le moteur (origine A, autre site) est une iframe hors processus : les témoins du
+        // scénario pont-ehp sont du même site que la page parente et n'ont pas de cible propre.
+        if (p.targetInfo.type === 'iframe' && !frameSession) {
           frameSession = p.sessionId;
           frameUrl = p.targetInfo.url;
           (async () => {

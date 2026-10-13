@@ -16,7 +16,7 @@
 # particular not the Czech localisation of Adobe Photoshop. Add entries the same way.
 # Conventions: menus are nouns (Soubor, Úpravy, Obraz ...), commands are infinitives (Otevřít…,
 # Uložit jako…), sentence case as in the English source. Product and technology names
-# (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...) stay in Latin letters; the trailing "…" of
+# (PhotoCraft, OpenType, CMYK, Lab ...) stay in Latin letters; the trailing "…" of
 # dialog commands is kept.
 
 # Layer Mask Display Options (the layer mask rubylith's colour and opacity)
@@ -801,12 +801,7 @@
 	Timeline	Časová osa
 	Tool Presets	Přednastavení nástrojů
 	Tools	Nástroje
-	About PhotoCraft	O aplikaci PhotoCraft
-	PhotoCraft Website	Web PhotoCraft
-	PhotoCraft on GitHub	PhotoCraft na GitHubu
-	ArtCraft Website	Web ArtCraft
-	Join the ArtCraft Discord…	Připojit se k Discordu ArtCraft…
-	Report an Issue…	Nahlásit problém…
+	About Lumbra	O aplikaci Lumbra
 	WIA Support…	Podpora WIA…
 	Apply	Použít
 	HSB/HSL	HSB/HSL
@@ -866,7 +861,7 @@
 	All Caps	Verzálky
 	All Slices	Všechny řezy
 	All User Slices	Všechny uživatelské řezy
-	All shortcuts reset to PhotoCraft defaults.	Všechny zkratky byly obnoveny na výchozí hodnoty PhotoCraftu.
+	All shortcuts reset to Lumbra defaults.	Všechny zkratky byly obnoveny na výchozí hodnoty Lumbry.
 	Alt	Alt
 	Always use pressure for opacity	Vždy použít přítlak pro krytí
 	Always use pressure for size	Vždy použít přítlak pro velikost
@@ -1097,7 +1092,6 @@
 	Diffusion	Difuze
 	Discard the embedded profile (don't color manage)	Zahodit vložený profil (bez správy barev)
 	Discontiguous	Nesouvislé
-	Discord	Discord
 	Dismiss	Zavřít
 	Display P3	Display P3
 	Display Text	Zobrazený text
@@ -1117,8 +1111,8 @@
 	Drop an image or PSD anywhere to open it.	Přetáhněte sem obrázek nebo PSD a otevře se.
 	Native file drag-and-drop is unavailable	Nativní přetahování souborů ve Waylandu není dostupné
 	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Nativní přetahování souborů ve Waylandu zatím není podporováno. Použijte Soubor › Otevřít, nebo obrázek zkopírujte ve správci souborů a vložte ho pomocí {paste}.
-	To drop files, start PhotoCraft under XWayland: `{command}`	Chcete-li soubory přetahovat, spusťte PhotoCraft v XWayland: `{command}`
-	Or set Preferences › Performance › Linux display server to X11: PhotoCraft then always starts under XWayland.	Nebo nastavte Předvolby › Výkon › Zobrazovací server Linuxu na X11: PhotoCraft se pak vždy spustí v XWayland.
+	To drop files, start Lumbra under XWayland: `{command}`	Chcete-li soubory přetahovat, spusťte Lumbra v XWayland: `{command}`
+	Or set Preferences › Performance › Linux display server to X11: Lumbra then always starts under XWayland.	Nebo nastavte Předvolby › Výkon › Zobrazovací server Linuxu na X11: Lumbra se pak vždy spustí v XWayland.
 	Edit › Paste	Úpravy › Vložit
 	Duplicate Layers…	Duplikovat vrstvy…
 	Duplicate style	Duplikovat styl
@@ -1232,7 +1226,6 @@
 	Invert All	Invertovat vše
 	Invert has no settings.	Invertovat nemá žádná nastavení.
 	Italic	Kurzíva
-	Join us on Discord	Přidejte se k nám na Discordu
 	Justify all	Do bloku vše
 	Justify last centered	Do bloku, poslední řádek na střed
 	Justify last left	Do bloku, poslední řádek vlevo
@@ -1368,9 +1361,10 @@
 	Perspective Warp is not active	Perspektivní deformace není aktivní
 	Perspective Warp: draw planes along the image's perspective, then switch to Warp	Perspektivní deformace: nakreslete roviny podle perspektivy obrazu a pak přepněte na deformaci
 	Photo Filter	Fotografický filtr
-	PhotoCraft	PhotoCraft
-	PhotoCraft Manages Colors	Barvy spravuje PhotoCraft
-	PhotoCraft — an open-source, native image editor written in Rust.	PhotoCraft — nativní editor obrázků s otevřeným zdrojovým kódem napsaný v jazyce Rust.
+	Lumbra	Lumbra
+	Lumbra Manages Colors	Barvy spravuje Lumbra
+	Lumbra — an open-source, native image editor written in Rust.	Lumbra — nativní editor obrázků s otevřeným zdrojovým kódem napsaný v jazyce Rust.
+	Based on PhotoCraft, open-source software (MIT OR Apache-2.0).	Založeno na PhotoCraft, softwaru s otevřeným zdrojovým kódem (MIT OR Apache-2.0).
 	Pin Depth:	Hloubka špendlíku:
 	Pixel Length:	Délka v pixelech:
 	Pixels/Centimeter	Pixely/centimetr
@@ -1446,11 +1440,11 @@
 	Import Shortcuts…	Importovat zkratky…
 	Load a keyboard shortcut set saved as .kys	Načíst sadu klávesových zkratek uloženou jako .kys
 	Imported {n} shortcuts from {file}. Click OK to keep them.	Importováno zkratek: {n} ze souboru {file}. Klepnutím na OK je ponecháte.
-	{n} commands are not in PhotoCraft.	Příkazů, které v PhotoCraftu nejsou: {n}.
+	{n} commands are not in Lumbra.	Příkazů, které v Lumbře nejsou: {n}.
 	Keyboard shortcuts imported	Klávesové zkratky importovány
 	Your keyboard shortcut set {set} is in use here: {n} shortcuts differ from the defaults. Edit › Keyboard Shortcuts shows them; Reset All to Defaults undoes this.	Vaše sada klávesových zkratek {set} se zde používá: {n} zkratek se liší od výchozích. Zobrazí je Úpravy › Klávesové zkratky; Obnovit vše na výchozí to vrátí zpět.
 	Import keyboard shortcuts?	Importovat klávesové zkratky?
-	PhotoCraft found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from PhotoCraft's. Import it?	PhotoCraft na tomto počítači našel vaši sadu klávesových zkratek {set} z jiného editoru obrázků: {n} jejích zkratek se liší od zkratek PhotoCraftu. Importovat ji?
+	Lumbra found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from Lumbra's. Import it?	Lumbra na tomto počítači našla vaši sadu klávesových zkratek {set} z jiného editoru obrázků: {n} jejích zkratek se liší od zkratek Lumbry. Importovat ji?
 	Edit › Keyboard Shortcuts › Reset All to Defaults undoes an import.	Úpravy › Klávesové zkratky › Obnovit vše na výchozí import vrátí zpět.
 	Don't Import	Neimportovat
 	The keyboard shortcut set was not imported: {error}	Sada klávesových zkratek nebyla importována: {error}
@@ -1643,7 +1637,6 @@
 	Apple Watch 45mm	Apple Watch 45 mm
 	Aqua	Akvamarínové
 	Art & Illustration	Umění a ilustrace
-	ArtCraft	ArtCraft
 	Background Eraser Tool	Nástroj guma pozadí
 	Bevel & Emboss	Úkos a reliéf
 	Blend Mode	Režim prolnutí
@@ -1680,7 +1673,7 @@
 	Current Tool	Aktuální nástroj
 	Custom Shape Tool	Nástroj vlastní tvar
 	Cyans	Azurové
-	Default PhotoCraft Size	Výchozí velikost PhotoCraft
+	Default Lumbra Size	Výchozí velikost Lumbra
 	Delete Workspace	Odstranit pracovní prostor
 	Diamond	Kosočtverec
 	Dimensions:	Rozměry:
@@ -1791,7 +1784,6 @@
 	Pen Tool	Nástroj pero
 	Convert Point Tool	Nástroj převést bod
 	Photo	Fotografie
-	PhotoCraft website	Web PhotoCraft
 	Picas	Pica
 	Pillow Emboss	Polštářový reliéf
 	Pixel Replacement	Nahrazení pixelů
@@ -2131,7 +2123,7 @@
 	System Info	Informace o systému
 	More panels	Další panely
 	More documents	Další dokumenty
-	These settings aren't available in PhotoCraft yet.	Tato nastavení zatím v aplikaci PhotoCraft nejsou k dispozici.
+	These settings aren't available in Lumbra yet.	Tato nastavení zatím v aplikaci Lumbra nejsou k dispozici.
 	Graphics	Grafika
 	Reset GPU Backend	Obnovit grafický backend
 	Applies at next launch.	Projeví se při příštím spuštění.
@@ -2264,7 +2256,7 @@
 	Automatic uses GPU acceleration when available and falls back to CPU rendering on errors.	Automatický režim používá dostupnou GPU a při chybě přejde na CPU.
 	Switched to CPU rendering	Přepnuto na vykreslování CPU
 	GPU acceleration could not continue. Your documents are unchanged.	Akcelerace GPU nemohla pokračovat. Dokumenty zůstaly nezměněny.
-	PhotoCraft is using the CPU image compositor. The window may still use your graphics adapter.	PhotoCraft skládá obraz pomocí CPU. Okno může nadále používat grafický adaptér.
+	Lumbra is using the CPU image compositor. The window may still use your graphics adapter.	Lumbra skládá obraz pomocí CPU. Okno může nadále používat grafický adaptér.
 	Retry GPU requires a restart. Save your work first.	Opakování GPU vyžaduje restart. Nejprve uložte práci.
 	Retry GPU tries the graphics processor again now.	Opakování GPU zkusí grafický procesor znovu hned teď.
 	GPU acceleration resumed.	Akcelerace GPU obnovena.
@@ -2513,7 +2505,7 @@ fontWeight	Italic	Kurzíva
 	Color to Alpha…	Barva na alfu…
 	Transparency Threshold	Práh průhlednosti
 	Opacity Threshold	Práh krytí
-	PhotoCraft — Screen Color Picker	PhotoCraft — Výběr barvy obrazovky
+	Lumbra — Screen Color Picker	Lumbra — Výběr barvy obrazovky
 
 	Rasterize svg groups deeper than	Rasterizovat skupiny SVG hlubší než tato úroveň
 	0 turns this threshold off; SVG groups nested deeper than 100 levels are always rasterized.	0 vypne tento práh; skupiny SVG vnořené hlouběji než 100 úrovní se rastrují vždy.
@@ -3281,7 +3273,7 @@ cameraData	Lens	Objektiv
 	Pyramids	Pyramidy
 	Quick Selection	Rychlý výběr
 	Quit	Ukončit
-	Quit PhotoCraft	Ukončit PhotoCraft
+	Quit Lumbra	Ukončit Lumbra
 	Quit {app}	Ukončit {app}
 	RGB	RGB
 	Radial Blur	Radiální rozostření
@@ -3695,9 +3687,9 @@ curves	Smooth	Vyhladit
 	{message} (notes: {n}; {warning})	{message} (poznámky: {n}; {warning})
 @plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (+{n} další upozornění k přednastavení štětců)|{warning} (+{n} další upozornění k přednastavení štětců)|{warning} (+{n} dalších upozornění k přednastavení štětců)
 	Preferences can't be saved	Předvolby nelze uložit
-	PhotoCraft keeps retrying; until a save succeeds, preference changes are lost when it closes.	PhotoCraft se nadále pokouší o uložení; dokud nebude úspěšné, změny předvoleb se při zavření ztratí.
+	Lumbra keeps retrying; until a save succeeds, preference changes are lost when it closes.	Lumbra se nadále pokouší o uložení; dokud nebude úspěšné, změny předvoleb se při zavření ztratí.
 	GPU retry scheduled	Naplánován další pokus o použití GPU
-	Save your work and restart PhotoCraft to retry GPU acceleration. CPU rendering remains active for this session.	Chcete-li znovu zkusit akceleraci GPU, uložte práci a restartujte PhotoCraft. V této relaci zůstane aktivní vykreslování pomocí CPU.
+	Save your work and restart Lumbra to retry GPU acceleration. CPU rendering remains active for this session.	Chcete-li znovu zkusit akceleraci GPU, uložte práci a restartujte Lumbra. V této relaci zůstane aktivní vykreslování pomocí CPU.
 	GPU device was lost; using the CPU renderer.	Spojení se zařízením GPU bylo ztraceno; používá se vykreslování pomocí CPU.
 	GPU error; using the CPU renderer.	Chyba GPU; používá se vykreslování pomocí CPU.
 @plural	{what} with {n} warning|{what} with {n} warnings	{what} ({n} upozornění)|{what} ({n} upozornění)|{what} ({n} upozornění)
@@ -3776,7 +3768,6 @@ navigator	Zoom	Zvětšení
 	on	zapnuto
 	off	vypnuto
 	This adjustment ({key}) is kept as imported and can't be edited yet.	Tato úprava ({key}) se uchovává v importované podobě a zatím ji nelze měnit.
-	Join the ArtCraft Discord ({url})	Přidejte se na Discord ArtCraft ({url})
 	{index} of {total}	{index} z {total}
 @plural	{n} step|{n} steps	{n} krok|{n} kroky|{n} kroků
 	{shortcut} assigned.	Zkratka {shortcut} přiřazena.

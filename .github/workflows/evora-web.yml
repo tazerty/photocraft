@@ -365,26 +365,28 @@ jobs:
           CHROME_BIN: google-chrome
           SMOKE_TIMEOUT_MS: "180000"
           # E3 : langue imposée par la coquille (?lang=), vérifiée dans les préférences du moteur.
-          # E5 : espace de noms du stockage (?storageNs=) et purge par evora:purge, acceptée de la
-          # seule page parente déclarée (?parentOrigin=, remplacée par l'origine B du test).
           # E2 : thème Evora clair imposé (?theme=light), vérifié dans les préférences du moteur.
+          # E5 corrigé : ?storageNs= et ?parentOrigin= (ancienne voie) restent dans l'URL pour prouver
+          # qu'ils sont ignorés hors pont : noms de l'amont, et l'ancien message de purge sans effet.
           SMOKE_QUERY: "webgl&lang=fr&theme=light&storageNs=evoraSmokeNs0123&parentOrigin={{PARENT_ORIGIN}}"
           SMOKE_EXPECT_LANG: fr
           SMOKE_EXPECT_THEME: evoraLight
           # E6 : polices servies à part ; navigateur en japonais pour que le moteur en charge une.
           SMOKE_BROWSER_LANG: ja
           SMOKE_EXPECT_FONTS: "1"
-          SMOKE_STORAGE_NS: evoraSmokeNs0123
-          SMOKE_PURGE: "1"
+          SMOKE_URL_STORAGE_NS: evoraSmokeNs0123
+          SMOKE_OLD_PURGE: "1"
         run: |
           set +e
-          # Hors pont : comportement amont, avec la langue, le thème et le stockage des patchs E2, E3, E5.
+          # Hors pont : comportement amont (noms de stockage compris), avec la langue et le thème
+          # des patchs E2 et E3.
           node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke.json" "$EVORA_FONTS_DIR"
           hors_pont=$?
-          # E4 : pont hôte EHP v1 (?host=evora), coquille minimale et evora-host.json écrit par le banc
-          # (evora/ci/smoke_ehp.mjs). Les attentes du scénario hors pont ne s'appliquent pas ici.
+          # E4 et E5 : pont hôte EHP v1 (?host=evora), coquille minimale et evora-host.json écrit par
+          # le banc ; espace de noms et purge par le pont (evora/ci/smoke_ehp.mjs). Les attentes du
+          # scénario hors pont ne s'appliquent pas ici.
           SMOKE_SCENARIO=pont-ehp SMOKE_QUERY="host=evora&webgl" SMOKE_EXPECT_LANG= SMOKE_EXPECT_THEME= \
-            SMOKE_BROWSER_LANG= SMOKE_EXPECT_FONTS= SMOKE_STORAGE_NS= SMOKE_PURGE= \
+            SMOKE_BROWSER_LANG= SMOKE_EXPECT_FONTS= SMOKE_URL_STORAGE_NS= SMOKE_OLD_PURGE= \
             node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-ehp.json" "$EVORA_FONTS_DIR"
           pont=$?
           echo "Test de fumée : hors pont $hors_pont, pont EHP $pont (0 = vert)"

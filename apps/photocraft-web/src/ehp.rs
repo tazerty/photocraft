@@ -21,7 +21,8 @@
 //! `evora:init` before it starts (`web::start`), then acknowledges it once running, or answers
 //! `evora:failed {code}` when it cannot start. Requests that need the app (`evora:open`,
 //! `evora:request-save`, `evora:theme`, `evora:lang`) are queued and applied at the start of a frame
-//! (`host_docs`).
+//! (`host_docs`). `evora:purge` empties the engine's storage (patch E5, `storage_ns`) and is
+//! acknowledged only once the deletions have completed.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -33,8 +34,9 @@ use wasm_bindgen::{JsCast as _, JsValue, closure::Closure};
 const APP: &str = "lumbra";
 const EHP: &str = "1.0";
 /// What this engine honours and its smoke test exercises (§9.1). Not declared: `doc.saved-ack`,
-/// `doc.multi`, `export.drive`, `pick.drive`, `font.inject`, `media.*`, `command`, `author`.
-const CAPABILITIES: [&str; 6] = ["doc.open", "doc.save", "doc.dirty", "doc.request-save", "live.lang", "live.theme"];
+/// `doc.multi`, `export.drive`, `pick.drive`, `font.inject`, `media.*`, `command`, `author`,
+/// `storage.memory`.
+const CAPABILITIES: [&str; 8] = ["doc.open", "doc.save", "doc.dirty", "doc.request-save", "storage.ns", "storage.purge", "live.lang", "live.theme"];
 /// The admitted parent origins, beside `index.html` (§2.3).
 const CONFIG: &str = "evora-host.json";
 const LANGS: [&str; 14] = ["ar", "de", "en", "es", "fr", "hi", "id", "it", "ja", "ko", "pt", "ru", "tr", "zh-Hans"];
@@ -309,6 +311,7 @@ impl Bridge {
             "evora:request-save" => Some("doc.request-save"),
             "evora:lang" => Some("live.lang"),
             "evora:theme" => Some("live.theme"),
+            "evora:purge" => Some("storage.purge"),
             // Unknown here, or a capability this engine doesn't declare: ignored (§4.1, §10).
             _ => return,
         };
@@ -348,6 +351,7 @@ impl Bridge {
             "evora:request-save" => self.on_request_save(&id, &payload),
             "evora:lang" => self.on_lang(&id, &payload),
             "evora:theme" => self.on_theme(&id, &payload),
+            "evora:purge" => self.on_purge(&id, &payload),
             _ => {}
         }
     }
@@ -493,6 +497,29 @@ impl Bridge {
         };
         // The accent is Evora's indigo already (patch E2); only light or dark changes here.
         self.push(HostEvent::Theme { id: id.to_owned(), dark });
+    }
+
+    /// `evora:purge {scope}` (patch E5, HOST-PROTOCOL §7.7): writes stop first, then the storage is
+    /// deleted; the acknowledgement follows the completed deletion.
+    fn on_purge(&self, id: &str, p: &JsValue) {
+        let all = match get(p, "scope").as_string().as_deref() {
+            Some("all") => true,
+            Some("current") => false,
+            _ => return,
+        };
+        if !only_keys(p, &["scope"]) {
+            return;
+        }
+        // Writes stop now, before any other task (a frame, a preset save) can run.
+        crate::storage_ns::stop_writes();
+        let bridge = self.clone();
+        let id = id.to_owned();
+        wasm_bindgen_futures::spawn_local(async move {
+            match crate::storage_ns::purge(all).await {
+                Ok(()) => bridge.ack(&id, true, None),
+                Err(code) => bridge.ack(&id, false, Some(code)),
+            }
+        });
     }
 }
 

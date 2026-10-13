@@ -15,7 +15,15 @@
 //     evora:save conforme (re = la demande, docRef, nom .pcraft, octets non vides d'une archive zip),
 //     puis evora:dirty false ; une seconde demande : evora:ack {ok: true, code: "clean"} ; Ctrl+S
 //     (action de l'utilisateur) : un evora:save sans re ;
-//   - evora:theme et evora:lang : accusés positifs, thème et langue enregistrés par le moteur ;
+//   - evora:theme et evora:lang : accusés positifs, thème et langue enregistrés par le moteur, sous
+//     l'espace de noms reçu dans evora:init ;
+//   - stockage (E5 corrigé) : restes posés avant le démarrage (autre compte, noms nus de l'amont)
+//     purgés à l'init, noms d'un autre moteur de la même origine conservés ; tout le stockage du
+//     moteur sous <storageNs>: ; aucune purge par un message de version 2, à champ en trop ou venu
+//     des témoins ; la vraie purge efface d'abord les clés, n'est PAS accusée tant qu'une autre
+//     connexion bloque la suppression de la base, puis l'est une fois la base supprimée, avec un
+//     stockage vide juste après l'accusé (restes hors espace de noms compris) ; plus aucune
+//     écriture ensuite ; OPFS et Cache Storage restent vides ;
 //   - aucune enveloppe hors norme (champ inconnu, version, type, ids, charge utile) et aucun
 //     evora:failed ; chaque capacité annoncée est exercée par ce scénario.
 // Chaque contrôle porte une étiquette [ehp:…] dans la liste des problèmes du rapport.
@@ -25,6 +33,12 @@ export const SCENARIO = 'pont-ehp';
 // Référence du document ouvert par la coquille et espace de noms du compte (valeurs de banc).
 const DOC_REF = '01JZZSMKEDCQMENTREF0000001';
 const STORAGE_NS = 'ab'.repeat(32);
+// E5 : un autre compte du même navigateur, et un autre moteur servi par la même origine.
+const OTHER_NS = 'cd'.repeat(32);
+const FOREIGN_KEY = 'autre-moteur:reglages';
+const FOREIGN_DB = 'autre-moteur.cache';
+const PREFS = 'photocraft.preferences';
+const PRESETS = 'photocraft.presets';
 // Plafond transmis dans evora:init : valeur de banc (pas un plafond du produit, D-15), assez large
 // pour la petite image et son document de travail.
 const BENCH_MAX_BYTES = 8 * 1024 * 1024;
@@ -33,7 +47,7 @@ const CAPABILITY_NAMES = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 
   'export.drive', 'media.need', 'media.ranges', 'pick.drive', 'command', 'storage.ns', 'storage.memory',
   'storage.purge', 'live.lang', 'live.theme', 'font.inject', 'author'];
 // Capacités que ce scénario exerce : le moteur ne doit en annoncer aucune autre.
-const EXERCISED = ['doc.open', 'doc.save', 'doc.dirty', 'doc.request-save', 'live.lang', 'live.theme'];
+const EXERCISED = ['doc.open', 'doc.save', 'doc.dirty', 'doc.request-save', 'storage.ns', 'storage.purge', 'live.lang', 'live.theme'];
 const ACK_CODES = ['clean', 'cancelled', 'conflict', 'too_large', 'quota', 'forbidden', 'not_found', 'invalid_content',
   'unsupported', 'rate_limited', 'read_only', 'busy', 'capability', 'network', 'server', 'timeout'];
 const FAIL_CODES = ['no_webgl2', 'wasm', 'memory', 'panic', 'unsupported_browser', 'protocol', 'init'];
@@ -72,6 +86,38 @@ function png() {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr),
     chunk('IDAT', zlib.deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0))]);
 }
+
+// Posé dans le document moteur avant son démarrage (Page.addScriptToEvaluateOnNewDocument).
+export const SEED_JS = `(() => {
+  if (window.__evoraSeeded) return;
+  window.__evoraSeeded = true;
+  try {
+    localStorage.setItem('${PREFS}', '{}');
+    localStorage.setItem('${OTHER_NS}:${PREFS}', '{}');
+    localStorage.setItem('${FOREIGN_KEY}', 'garde');
+  } catch (e) { /* stockage refusé : les contrôles le diront */ }
+  for (const name of ['${PRESETS}', '${OTHER_NS}:${PRESETS}', '${FOREIGN_DB}']) {
+    const r = indexedDB.open(name, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('files');
+    r.onsuccess = () => r.result.close();
+  }
+})();`;
+
+// Tout le stockage visible du document moteur.
+const STORAGE_ALL = `(async () => {
+  const keys = Object.keys(localStorage);
+  const dbs = indexedDB.databases ? (await indexedDB.databases()).map((d) => d.name) : null;
+  let opfs = null;
+  try { const root = await navigator.storage.getDirectory(); opfs = []; for await (const [n] of root.entries()) opfs.push(n); } catch (e) { opfs = 'indisponible'; }
+  let cacheKeys = null;
+  try { cacheKeys = await caches.keys(); } catch (e) { cacheKeys = 'indisponible'; }
+  let session = null;
+  try { session = Object.keys(sessionStorage); } catch (e) { session = 'indisponible'; }
+  let prefs = null;
+  try { prefs = JSON.parse(localStorage.getItem('${STORAGE_NS}:${PREFS}') || 'null'); } catch (e) { prefs = 'illisible'; }
+  const iface = (prefs && prefs.interface) || {};
+  return JSON.stringify({ keys, dbs, opfs, caches: cacheKeys, session, theme: iface.theme ?? null, language: iface.language ?? null });
+})()`;
 
 export function hostConfig(parentOrigin) {
   return JSON.stringify({ parentOrigins: [parentOrigin] });
@@ -193,6 +239,7 @@ export class EhpBench {
     this.problems = [];
     this.state = { log: [], sent: [] };
     this.readyCaps = [];
+    this.storageLog = [];
   }
 
   fail(tag, text) {
@@ -348,6 +395,100 @@ export class EhpBench {
       const ack = await this.waitEngine(this.response('evora:ack', this.ids[step]), 15000);
       if (!ack || ack.msg.payload.ok !== true) this.fail(step, `accusé de evora:${step} absent ou négatif : ${JSON.stringify(ack && ack.msg)}`);
     }
+    // Préférences enregistrées par le moteur, sous l'espace de noms de evora:init.
+    let st = null;
+    const end = Date.now() + 10000;
+    do {
+      await sleep(500);
+      st = await this.storage();
+    } while (Date.now() < end && (st.theme !== 'evora' || st.language !== 'de'));
+    this.storageLog.push({ phase: 'session', ...st });
+    if (st.theme !== 'evora') this.fail('theme', `thème enregistré après evora:theme dark : ${st.theme}, attendu evora (${STORAGE_NS.slice(0, 8)}…:${PREFS})`);
+    if (st.language !== 'de') this.fail('lang', `langue enregistrée après evora:lang de : ${st.language}, attendue de (${STORAGE_NS.slice(0, 8)}…:${PREFS})`);
+    await this.storagePhases(st);
+  }
+
+  async storage() {
+    return JSON.parse(await this.evaluate(this.frame(), STORAGE_ALL));
+  }
+
+  // Noms de ce moteur (nus ou sous un espace de noms) parmi des clés ou des bases.
+  static engineNames(list, name) {
+    return (list || []).filter((k) => k === name || (k.endsWith(`:${name}`) && k.length > name.length + 1));
+  }
+
+  // E5 corrigé : espace de noms, purge à l'init, témoins de purge, purge réelle, plus d'écriture.
+  async storagePhases(session) {
+    const mine = { keys: [`${STORAGE_NS}:${PREFS}`], dbs: [`${STORAGE_NS}:${PRESETS}`] };
+    const names = (st) => ({ keys: EhpBench.engineNames(st.keys, PREFS), dbs: EhpBench.engineNames(st.dbs, PRESETS) });
+    const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+    const foreignKept = (st, phase) => {
+      if (!st.keys.includes(FOREIGN_KEY) || (st.dbs && !st.dbs.includes(FOREIGN_DB))) {
+        this.fail('foreign-names', `${phase} : les noms d'un autre moteur de la même origine ont été effacés : ${JSON.stringify({ keys: st.keys, dbs: st.dbs })}`);
+      }
+    };
+    const untouched = (st, phase) => {
+      if (Array.isArray(st.opfs) && st.opfs.length) this.fail('opfs', `${phase} : OPFS non vide : ${st.opfs.join(', ')}`);
+      if (Array.isArray(st.caches) && st.caches.length) this.fail('caches', `${phase} : Cache Storage non vide : ${st.caches.join(', ')}`);
+      if (Array.isArray(st.session) && st.session.length) this.fail('session-storage', `${phase} : sessionStorage non vide : ${st.session.join(', ')}`);
+    };
+    // 1. Après l'init et la séance : tout sous l'espace de noms ; autres comptes et noms nus purgés.
+    const n1 = names(session);
+    if (!same(n1.keys, mine.keys) || (session.dbs && !same(n1.dbs, mine.dbs))) {
+      this.fail('namespace', `stockage du moteur hors de l'espace de noms ou restes non purgés à l'init : ${JSON.stringify(n1)}, attendu ${JSON.stringify(mine)}`);
+    }
+    if (session.dbs === null) this.fail('bench', 'indexedDB.databases() indisponible : bases non vérifiables');
+    foreignKept(session, 'après l\'init');
+    untouched(session, 'après l\'init');
+    // 2. Témoins de purge : version 2, champ d'enveloppe en trop, origine non admise, autre fenêtre.
+    this.ids.purgeV2 = await this.send('evora:purge', `{ scope: 'all' }`, { v: 2 });
+    this.ids.purgeExtraField = await this.send('evora:purge', `{ scope: 'all' }`, { extraField: true });
+    this.ids.purgeForeign = await this.witness('foreign', 'evora:purge', { scope: 'all' });
+    this.ids.purgeSibling = await this.witness('sibling', 'evora:purge', { scope: 'all' });
+    await sleep(2500);
+    const witness = await this.storage();
+    this.storageLog.push({ phase: 'témoins de purge', ...witness });
+    const n2 = names(witness);
+    if (!same(n2.keys, mine.keys) || (witness.dbs && !same(n2.dbs, mine.dbs))) {
+      this.fail('purge-witness', `un message de purge invalide a effacé le stockage : ${JSON.stringify(n2)}`);
+    }
+    // 3. Restes hors espace de noms reposés juste avant la purge, et une connexion qui bloque la
+    //    suppression de la base du compte (comme un autre onglet).
+    const blocker = await this.evaluate(this.frame(), `(async () => {
+      localStorage.setItem('${PREFS}', '{}');
+      await new Promise((r) => { const q = indexedDB.open('${PRESETS}', 1); q.onupgradeneeded = () => q.result.createObjectStore('files'); q.onsuccess = () => { q.result.close(); r(); }; q.onerror = () => r(); });
+      window.__evoraBlocker = await new Promise((r) => { const q = indexedDB.open('${STORAGE_NS}:${PRESETS}'); q.onsuccess = () => r(q.result); q.onerror = () => r(null); });
+      return window.__evoraBlocker !== null;
+    })()`);
+    if (!blocker) this.fail('bench', 'connexion de blocage non ouverte : ordre accusé/suppression non vérifiable');
+    // 4. La vraie purge : pas d'accusé tant que la base n'est pas supprimée.
+    this.ids.purge = await this.send('evora:purge', `{ scope: 'current' }`);
+    await sleep(2500);
+    await this.refresh();
+    const early = this.engineMessages().find((e) => e.msg.re === this.ids.purge);
+    const blocked = await this.storage();
+    this.storageLog.push({ phase: 'purge bloquée', ...blocked });
+    if (early) this.fail('purge-early-ack', `evora:purge accusé alors que la suppression de la base est encore bloquée : ${JSON.stringify(early.msg)}`);
+    if (names(blocked).keys.length) this.fail('purge-order', `clés du moteur encore présentes pendant la suppression de la base : ${names(blocked).keys.join(', ')}`);
+    await this.evaluate(this.frame(), 'window.__evoraBlocker && window.__evoraBlocker.close(); true');
+    const ack = await this.waitEngine(this.response('evora:ack', this.ids.purge), 20000);
+    const after = await this.storage();
+    this.storageLog.push({ phase: 'après l\'accusé de purge', ...after });
+    if (!ack || ack.msg.payload.ok !== true) this.fail('purge', `accusé de evora:purge absent ou négatif : ${JSON.stringify(ack && ack.msg)}`);
+    const n4 = names(after);
+    if (n4.keys.length || (after.dbs && n4.dbs.length)) this.fail('purge-left', `stockage du moteur encore présent juste après l'accusé de purge : ${JSON.stringify(n4)}`);
+    foreignKept(after, 'après la purge');
+    untouched(after, 'après la purge');
+    // 5. Plus aucune écriture : un changement de thème après la purge n'écrit rien.
+    this.ids.themeAfterPurge = await this.send('evora:theme', `{ theme: 'light', accent: '#4F46E5' }`);
+    const themeAck = await this.waitEngine(this.response('evora:ack', this.ids.themeAfterPurge), 15000);
+    if (!themeAck || themeAck.msg.payload.ok !== true) this.fail('theme', `accusé de evora:theme après la purge absent ou négatif : ${JSON.stringify(themeAck && themeAck.msg)}`);
+    await sleep(2500);
+    const later = await this.storage();
+    this.storageLog.push({ phase: 'après une écriture tentée', ...later });
+    const n5 = names(later);
+    if (n5.keys.length || (later.dbs && n5.dbs.length)) this.fail('purge-rewrite', `le moteur a de nouveau écrit après la purge : ${JSON.stringify(n5)}`);
+    untouched(later, 'après une écriture tentée');
   }
 
   // Le dernier evora:dirty du document, après l'evora:save de la demande, vaut false.
@@ -359,7 +500,7 @@ export class EhpBench {
   }
 
   // Conformité de chaque enveloppe reçue du moteur, et des réponses.
-  verify(storage) {
+  verify() {
     const msgs = this.engineMessages();
     const ids = new Set();
     for (const e of msgs) {
@@ -413,7 +554,11 @@ export class EhpBench {
     for (const [key, tag, label] of [['v2', 'answer-v2', 'un evora:init de version 2'],
       ['extraField', 'answer-envelope', 'un evora:init à l\'enveloppe augmentée d\'un champ'],
       ['foreign', 'answer-foreign', 'un message d\'une origine non admise'],
-      ['sibling', 'answer-source', 'un message de l\'origine admise venu d\'une autre fenêtre']]) {
+      ['sibling', 'answer-source', 'un message de l\'origine admise venu d\'une autre fenêtre'],
+      ['purgeV2', 'answer-v2', 'un evora:purge de version 2'],
+      ['purgeExtraField', 'answer-envelope', 'un evora:purge à l\'enveloppe augmentée d\'un champ'],
+      ['purgeForeign', 'answer-foreign', 'un evora:purge d\'une origine non admise'],
+      ['purgeSibling', 'answer-source', 'un evora:purge de l\'origine admise venu d\'une autre fenêtre']]) {
       if (this.ids[key] && answered(this.ids[key]).length) this.fail(tag, `le moteur a répondu à ${label} : ${JSON.stringify(answered(this.ids[key])[0].msg)}`);
     }
     const announced = this.readyCaps;
@@ -421,10 +566,6 @@ export class EhpBench {
     if (extra.length) this.fail('caps', `capacités annoncées non exercées par ce scénario : ${extra.join(', ')}`);
     const missing = EXERCISED.filter((x) => !announced.includes(x));
     if (missing.length) this.fail('caps', `capacités attendues absentes de evora:ready : ${missing.join(', ')}`);
-    if (storage) {
-      if (storage.theme !== 'evora') this.fail('theme', `thème enregistré après evora:theme dark : ${storage.theme}, attendu evora`);
-      if (storage.language !== 'de') this.fail('lang', `langue enregistrée après evora:lang de : ${storage.language}, attendue de`);
-    }
     return this.problems;
   }
 

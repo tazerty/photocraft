@@ -15,8 +15,9 @@ Portes :
      symbolique dans l'artefact ;
   3. licences (bloquante) : LICENSES/ complet (fichiers de l'amont, mentions, cargo-about) ;
   4. émojis (E10) : chaque symbole des catalogues affichés est résolu dans la pile de polices
-     d'egui (comme au rendu) ; bloquante pour les catalogues ; pour les littéraux du code d'ui-egui,
-     bloquante si EVORA_GATE_CODE_EMOJI=block, sinon mesure ;
+     d'egui (comme au rendu) ; un point de code émoji (table de Noto Emoji, Emoji_Presentation)
+     n'est admis que dessiné par une police de texte ; bloquante pour les catalogues ; pour les
+     littéraux du code d'ui-egui, bloquante si EVORA_GATE_CODE_EMOJI=block, sinon mesure ;
   5. termes sensibles (E9) : Lumetri, Lightroom, Acrobat, Premiere, Adobe, Cycore dans les
      catalogues affichés après le catalogue de surcharge (i18n/overlay.tsv s'il existe) ; bloquante
      si EVORA_GATE_TERMS=block, sinon mesure ;
@@ -49,6 +50,10 @@ EMOJI_BMP = set([0x231A, 0x231B, 0x23E9, 0x23EA, 0x23EB, 0x23EC, 0x23F0, 0x23F3,
                  0x2753, 0x2754, 0x2755, 0x2757, 0x2795, 0x2796, 0x2797, 0x27B0, 0x27BF, 0x2B1B, 0x2B1C, 0x2B50, 0x2B55])
 EMOJI_JOINERS = {0xFE0F, 0x200D, 0x20E3} | set(range(0x1F3FB, 0x1F400)) | set(range(0x1F1E6, 0x1F200))
 EMOJI_FONTS = {"NotoEmoji-Regular", "emoji-icon-font"}
+TEXT_FONTS = {"Inter", "Ubuntu-Light", "Hack", "JetBrainsMono"}
+# Points de code émoji : la table cmap de Noto Emoji (police d'émojis d'egui, lue comme donnée même
+# quand E10 l'a retirée de la pile), plus la liste Emoji_Presentation ci-dessus.
+EMOJI_CODEPOINTS: set[int] = set()
 AUDITED = "✓✔✖⚠★"
 CJK_RANGES = [(0x2E80, 0x2FFF), (0x3000, 0x303F), (0x3040, 0x30FF), (0x3100, 0x33FF), (0x3400, 0x9FFF),
               (0xAC00, 0xD7AF), (0xF900, 0xFAFF), (0xFE30, 0xFE4F), (0xFF00, 0xFFEF), (0x20000, 0x3FFFF)]
@@ -236,7 +241,13 @@ def font_stack() -> list[tuple[str, set[int]]]:
             fail(f"police {n} de la pile introuvable ({f})")
             continue
         stack.append((n, cmap(f)))
+    noto = files.get("NotoEmoji-Regular")
+    if noto and noto.exists():
+        EMOJI_CODEPOINTS.update(cmap(noto))
+    else:
+        fail("Noto Emoji introuvable : impossible de classer les points de code émoji")
     report["fontStack"] = names
+    report["emojiCodepoints"] = len(EMOJI_CODEPOINTS)
     return stack
 
 
@@ -255,8 +266,9 @@ def emoji_verdict(ch: str, stack) -> tuple[str | None, str | None]:
         return font, "séquence d'émoji (VS16, ZWJ, modificateur)"
     if c in EMOJI_BMP or c >= 0x1F000 and not (0x1F100 <= c <= 0x1F1E5):
         return font, "présentation émoji par défaut"
-    if font in EMOJI_FONTS:
-        return font, f"dessiné par la police d'émojis {font}"
+    if c in EMOJI_CODEPOINTS and font not in TEXT_FONTS:
+        # Un point de code émoji n'est admis que dessiné par une police de texte (présentation texte).
+        return font, f"point de code émoji dessiné par {font or 'aucune police (tofu)'}"
     if font is None and unicodedata.category(ch).startswith("S") and not any(a <= c <= b for a, b in CJK_RANGES):
         return font, "aucune police de la pile (tofu)"
     return font, None
@@ -285,8 +297,8 @@ def gate_emoji(entries) -> None:
     rows, bad = [], []
     for ch, e in sorted(seen.items(), key=lambda kv: -kv[1]["count"]):
         font, why = emoji_verdict(ch, stack)
-        if unicodedata.category(ch)[0] == "P" and why is None and ch not in AUDITED:
-            continue  # ponctuation dessinée par une police de texte : rien à signaler
+        if unicodedata.category(ch)[0] == "P" and why is None and ch not in AUDITED and font in TEXT_FONTS | {None}:
+            continue  # ponctuation dessinée par une police de texte (ou de repli CJK) : rien à signaler
         rows.append((ch, e, font, why))
         if why:
             bad.append(f"U+{ord(ch):04X} {unicodedata.name(ch, '?')} ({why}), ex. « {e['example']} »")
@@ -307,7 +319,8 @@ def gate_emoji(entries) -> None:
     summary.append(f"Pile proportionnelle résolue comme au rendu : {' → '.join(n for n, _ in stack)}.\n")
     summary.append("| Car. | Point de code | Occurrences | Langues | Police au rendu | Verdict |\n| --- | --- | ---: | ---: | --- | --- |")
     for ch, e, font, why in rows:
-        summary.append(f"| {ch} | U+{ord(ch):04X} | {e['count']} | {len(e['langs'])} | {font or '—'} | {why or 'texte'} |")
+        verdict = why or ("non émoji, police d'icônes d'egui avant les polices CJK" if font in EMOJI_FONTS else "texte")
+        summary.append(f"| {ch} | U+{ord(ch):04X} | {e['count']} | {len(e['langs'])} | {font or '—'} | {verdict} |")
     summary.append(f"\nLittéraux du code (ui-egui, photocraft-web, hors tests) : {len(code_bad)} refus ({'bloquant' if strict else 'mesure'}).\n")
     for b in code_bad:
         summary.append(f"- {b}")

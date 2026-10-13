@@ -14,7 +14,9 @@
 # origine différente (evora/ci/). Chaque porte s'exécute même si une autre échoue ; le bilan échoue
 # s'il en manque une, et l'artefact n'est publié qu'après un bilan vert.
 #
-# Sortie : artefact (zip du site statique + SHA256SUMS + csp-hashes.txt).
+# Sortie : artefact evora-lumbra-web-<tag> (evora-lumbra-web-<tag>.zip : site statique, .br et .gz,
+# LICENSES/, csp-hashes.txt ; evora-lumbra-fonts-<tag>.zip : polices servies à part ; SHA256SUMS ;
+# csp-hashes.txt).
 name: Evora web
 
 on:
@@ -249,7 +251,8 @@ jobs:
             exit 1
           fi
           ls "$site"/*.wasm >/dev/null
-          name="evora-photocraft-web-${UPSTREAM_TAG}"
+          # Nom Evora, posé après E1 et les portes au vert (EVORA-LUM-02 à 11).
+          name="evora-lumbra-web-${UPSTREAM_TAG}"
           # Dossiers neufs à chaque exécution : rien à nettoyer.
           work=$(mktemp -d "$RUNNER_TEMP/evora-package.XXXXXX")
           out=$(mktemp -d "$RUNNER_TEMP/evora-out.XXXXXX")
@@ -270,6 +273,7 @@ jobs:
           # Empreintes CSP des scripts en ligne d'index.html (politique cible, ARCHITECTURE §3.6).
           python3 -I evora/ci/csp_hashes.py "$work/$name/index.html" "$work/$name/csp-hashes.txt"
           {
+            echo "product: Evora Lumbra (moteur web)"
             echo "upstream: storytold/photocraft ${UPSTREAM_TAG} (${UPSTREAM_COMMIT})"
             echo "fork: ${GITHUB_REPOSITORY} ${GITHUB_REF_NAME} (${GITHUB_SHA})"
             echo "run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

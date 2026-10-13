@@ -327,16 +327,10 @@ fn table_height(ui: &egui::Ui, rows: usize) -> f32 {
     (TABLE_HEADER_H + body).min(LIST_HEIGHT)
 }
 
-/// A contributor's name, linking to their GitHub profile. Routes through [`crate::links::open`]
-/// (the platform browser service) rather than `ui.hyperlink_to`'s `ctx.open_url`, which the
-/// desktop build can't rely on (egui_winit needs its "links" feature, which we don't enable).
-fn link(app: &mut PhotocraftApp, ui: &mut egui::Ui, c: &Contributor, names: NameMode) -> egui::Response {
-    let url = format!("https://github.com/{}", c.login);
-    let r = ui.add(egui::Link::new(c.name(names))).on_hover_text(c.summary());
-    if r.clicked() {
-        crate::links::open(app, ui.ctx(), &url);
-    }
-    r
+/// A contributor's name. Evora build (patch E7): plain text, without the link to their GitHub
+/// profile, so the About window opens no page outside the engine's origin.
+fn link(_app: &mut PhotocraftApp, ui: &mut egui::Ui, c: &Contributor, names: NameMode) -> egui::Response {
+    ui.add(egui::Label::new(c.name(names))).on_hover_text(c.summary())
 }
 
 fn text_width(ui: &egui::Ui, text: &str, font: &egui::FontId) -> f32 {

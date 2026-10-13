@@ -207,8 +207,9 @@ export class EhpBench {
 
   async refresh() {
     try {
-      const v = await this.evaluate(this.page, 'JSON.stringify(window.__ehp ? { log: __ehp.log, sent: __ehp.sent } : null)');
-      if (v) this.state = JSON.parse(v);
+      const v = JSON.parse(await this.evaluate(this.page, 'JSON.stringify(window.__ehp ? { log: __ehp.log, sent: __ehp.sent } : null)'));
+      // Harnais pas encore chargé (null) : le journal reste celui du tour précédent.
+      if (v) this.state = v;
     } catch {
       // Page parente en cours de chargement : le journal sera relu au tour suivant.
     }

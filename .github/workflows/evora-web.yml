@@ -319,6 +319,9 @@ jobs:
         env:
           CHROME_BIN: google-chrome
           SMOKE_TIMEOUT_MS: "180000"
+          # E3 : langue imposée par la coquille (?lang=), vérifiée dans les préférences du moteur.
+          SMOKE_QUERY: "webgl&lang=fr"
+          SMOKE_EXPECT_LANG: fr
         run: node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke.json"
 
       - name: Bilan des portes

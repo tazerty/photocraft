@@ -58,19 +58,41 @@ pub fn start() {
             return;
         };
         let q = query();
-        // Evora build (patch E3): the UI language the host imposes (`?lang=`).
-        let forced_language = host_language(query_param(&q, "lang").as_deref());
-        // Evora build (patch E2): the Evora theme, light or dark as the host asks (`?theme=`),
-        // instead of upstream's Pro theme imposed at every start.
-        let theme = host_theme(query_param(&q, "theme").as_deref());
+        // Evora build (patch E4, with LUM-01): every query parameter is read by name, never by a
+        // substring search of the whole query. `?host=evora` speaks the Evora host protocol (EHP v1,
+        // module `ehp`) with the parent origin `evora-host.json` admits: the engine announces itself,
+        // then touches no browser storage and does not start before `evora:init`. Without an
+        // admitted parent the bridge stays mute and the engine does not start at all.
+        let bridge = if query_param(&q, "host").as_deref() == Some("evora") {
+            let Some(bridge) = crate::ehp::connect().await else {
+                log::warn!("photocraft-web: ?host=evora without a parent admitted by evora-host.json: the engine does not start");
+                return;
+            };
+            Some(bridge)
+        } else {
+            None
+        };
+        let init = match &bridge {
+            Some(bridge) => Some(bridge.wait_init().await),
+            None => None,
+        };
+        let (forced_language, theme) = match &init {
+            // E3 and E2 through `evora:init`: the engine language the host chose (English when it
+            // has none) and its theme, light or dark.
+            Some(init) => (Some(crate::host_docs::engine_language(init.engine_lang.as_deref())), crate::host_docs::theme_kind(init.dark)),
+            // Evora build (patch E3): the UI language the host imposes (`?lang=`). Patch E2: the
+            // Evora theme, light or dark as the host asks (`?theme=`), instead of upstream's Pro
+            // theme imposed at every start.
+            None => (host_language(query_param(&q, "lang").as_deref()), host_theme(query_param(&q, "theme").as_deref())),
+        };
         // Evora build (patch E5): the storage namespace, before any storage is read, and the
         // host's `evora:purge` (accepted from `?parentOrigin=` only).
         crate::storage_ns::init(query_param(&q, "storageNs").as_deref());
         crate::storage_ns::listen_purge(query_param(&q, "parentOrigin"), crate::indexed_presets::DATABASE);
-        let force_cpu = q.contains("cpu");
+        let force_cpu = query_flag(&q, "cpu");
         let mut options = eframe::WebOptions::default();
         photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
-        if q.contains("webgl")
+        if query_flag(&q, "webgl")
             && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
         {
             create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
@@ -89,6 +111,7 @@ pub fn start() {
             }
         };
         let pen_target = canvas.clone();
+        let shell_bridge = bridge.clone();
         let result = eframe::WebRunner::new()
             .start(
                 canvas,
@@ -102,7 +125,7 @@ pub fn start() {
                     let (session, warnings) = crate::preset_bridge::session(presets.clone());
                     preset_warnings.extend(warnings);
                     let drag = listen_drag(&pen_target);
-                    let mut app = PhotocraftApp::new(session, services(inbox.clone(), place_inbox.clone(), drag_pos_service(pen_target.clone(), drag)));
+                    let mut app = PhotocraftApp::new(session, services(inbox.clone(), place_inbox.clone(), drag_pos_service(pen_target.clone(), drag), shell_bridge.clone()));
                     if !preset_warnings.is_empty() {
                         photocraft_ui_egui::notices::post(&mut app, i18n::t("Some brush presets could not be loaded"), preset_warnings, true, None);
                     }
@@ -121,10 +144,26 @@ pub fn start() {
                     }
                     let unsaved = Arc::new(AtomicBool::new(false));
                     guard_unload(unsaved.clone());
-                    Ok(Box::new(WebShell { app, inbox, place_inbox, unsaved, served, database, presets }))
+                    // Evora build (patch E4): the host's requests reach the app between frames.
+                    let host = shell_bridge.map(|bridge| {
+                        bridge.attach(cc.egui_ctx.clone());
+                        crate::host_docs::HostDocs::new(bridge)
+                    });
+                    Ok(Box::new(WebShell { app, inbox, place_inbox, unsaved, served, database, presets, host }))
                 }),
             )
             .await;
+        // Evora build (patch E4): `evora:init` is acknowledged once the engine runs, or answered by
+        // `evora:failed` when it cannot start (HOST-PROTOCOL §4.5).
+        if let (Some(bridge), Some(init)) = (&bridge, &init) {
+            match &result {
+                Ok(()) => bridge.ack(&init.id, true, None),
+                Err(e) => {
+                    let text = e.as_string().unwrap_or_else(|| format!("{e:?}"));
+                    bridge.failed(if text.contains("WebGL") || text.contains("WebGPU") { "no_webgl2" } else { "init" });
+                }
+            }
+        }
         if let Some(el) = document.get_element_by_id("photocraft_loading") {
             match result {
                 Ok(()) => el.remove(),
@@ -218,6 +257,13 @@ fn query() -> String {
     web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default()
 }
 
+/// Evora build (LUM-01, with patch E4): is the flag `key` present (`?cpu`, `?cpu=1`)? Exact key
+/// match; upstream searched the whole query for a substring, so a value such as a file or language
+/// name containing "cpu" or "webgl" switched the renderer.
+fn query_flag(query: &str, key: &str) -> bool {
+    query.trim_start_matches('?').split('&').any(|pair| pair.split_once('=').map_or(pair, |(k, _)| k) == key)
+}
+
 /// The value of `key` in a query string (`?a=1&lang=fr`): exact key match (not a substring
 /// search), `+` read as a space, percent-decoded. `None` when the key is absent or undecodable.
 fn query_param(query: &str, key: &str) -> Option<String> {
@@ -244,7 +290,7 @@ fn host_theme(value: Option<&str>) -> ThemeKind {
 /// catalog, else to their primary language. `None` (the preference is left alone) for a missing or
 /// malformed tag, a language without a catalog (Arabic, Hindi: the host shows its own notice), and
 /// a bare `pt` or any Portuguese tag but `pt-BR`: no variant is chosen until decision D-23.
-fn host_language(tag: Option<&str>) -> Option<&'static str> {
+pub(crate) fn host_language(tag: Option<&str>) -> Option<&'static str> {
     let tag = tag?.trim().replace('_', "-").to_ascii_lowercase();
     if tag.is_empty() || tag.len() > 35 || !tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return None;
@@ -330,6 +376,8 @@ struct WebShell {
     served: Served,
     database: Option<web_sys::IdbDatabase>,
     presets: crate::preset_bridge::Bridge,
+    /// Evora build (patch E4): the host's documents, with `?host=evora`.
+    host: Option<crate::host_docs::HostDocs>,
 }
 
 impl WebShell {
@@ -422,6 +470,9 @@ impl eframe::App for WebShell {
             });
         }
         self.serve_fonts(ctx);
+        if let Some(host) = self.host.as_mut() {
+            host.apply(&mut self.app, ctx);
+        }
         self.app.logic(ctx, frame);
         self.save_presets(ctx);
     }
@@ -452,10 +503,20 @@ impl eframe::App for WebShell {
         }
         self.app.ui(ui, frame);
         self.save_presets(ui.ctx());
+        if let Some(host) = self.host.as_mut() {
+            host.report(&self.app);
+        }
     }
 }
 
-fn services(inbox: Inbox, place_inbox: Inbox, cursor_pos: photocraft_ui_egui::CursorPosFn) -> Services {
+fn services(inbox: Inbox, place_inbox: Inbox, cursor_pos: photocraft_ui_egui::CursorPosFn, bridge: Option<crate::ehp::Bridge>) -> Services {
+    // Evora build (patch E4): with the bridge, the host's document is saved to the host and nothing
+    // is downloaded (`host_docs::write`); without it, upstream's download.
+    let write_unconfirmed = bridge.is_none();
+    let write: photocraft_ui_egui::WriteFn = match bridge {
+        Some(bridge) => Box::new(move |path: &str, bytes: &[u8]| crate::host_docs::write(&bridge, path, bytes)),
+        None => Box::new(|path: &str, bytes: &[u8]| download(path, bytes)),
+    };
     Services {
         screen_pick: screen_color_service(),
         import: Some(Box::new(|name: &str, bytes: &[u8], opts: &photocraft_io::ImportOptions| {
@@ -500,9 +561,12 @@ fn services(inbox: Inbox, place_inbox: Inbox, cursor_pos: photocraft_ui_egui::Cu
                 reply.send(Some(FileDialogAnswer::SaveTo(name)));
             }
         })),
-        write: Some(Box::new(|path: &str, bytes: &[u8]| download(path, bytes))),
+        write: Some(write),
         // A download may be cancelled and never reports back: it doesn't save the document.
-        write_unconfirmed: true,
+        // Evora build (patch E4): the bridge's write does count as written, since `host_docs`
+        // binds each save to the revision it wrote and keeps the document modified until the
+        // host acknowledges it (doc.saved-ack, patch LUM-04).
+        write_unconfirmed,
         encode_png: Some(Box::new(|w, h, rgba| {
             let img = Image::from_u8(w, h, ChannelLayout::Rgba, rgba.to_vec()).map_err(|e| e.to_string())?;
             photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())

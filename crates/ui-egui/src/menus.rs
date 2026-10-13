@@ -1459,7 +1459,8 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
             }
             let label = translated_menu_label(lang, it);
             let prefix = match it.checked {
-                Some(true) => "✔ ",
+                // Evora build (patch E10): U+2713, drawn by Inter, rather than the emoji-only U+2714.
+                Some(true) => "✓ ",
                 Some(false) => "   ",
                 None => "",
             };

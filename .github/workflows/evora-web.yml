@@ -1,14 +1,20 @@
-# Evora web : CI du fork tazerty/photocraft, futur moteur d'Evora Lumbra (patch EVORA-LUM-00).
+# Evora web : CI du fork tazerty/photocraft, futur moteur d'Evora Lumbra.
 #
 # Écrite par Evora à partir de packaging/web/package.sh, packaging/env.sh et de la section
 # « Web build » de docs/development.md (code du dépôt, MIT OR Apache-2.0). Rien n'est repris de
 # storytold/craft-common-actions. Aucune action tierce : seules actions/checkout, actions/cache et
-# actions/upload-artifact, épinglées par SHA complet. Les outils de build sont téléchargés depuis
-# leurs releases officielles à une version fixe et vérifiés par SHA-256 ; Trunk tourne hors ligne,
-# il ne peut donc rien télécharger d'autre.
+# actions/upload-artifact, épinglées par SHA complet. Les outils (Trunk, wasm-bindgen, wasm-opt,
+# cargo-deny, cargo-about) sont téléchargés depuis leurs releases officielles à une version fixe et
+# vérifiés par SHA-256 ; Trunk tourne hors ligne, il ne peut donc rien télécharger d'autre.
 #
-# Sortie : artefact evora-photocraft-web-<tag> (zip du site statique + SHA256SUMS). Le nom reste
-# celui de l'amont tant que le patch E1 (retrait des marques ArtCraft) n'est pas posé.
+# Portes bloquantes (EVORA-LUM-NN CI, après E1) : cargo-deny (licences, advisories, sources,
+# doublons en avertissement), cargo-about (LICENSES/THIRD-PARTY-RUST.html), marques ArtCraft,
+# fichiers d'hébergement, LICENSES/ complet, émojis des catalogues affichés (résolus dans la pile de
+# polices d'egui), précompression .br/.gz et empreintes CSP, test de fumée Chrome sans interface en
+# origine différente (evora/ci/). Chaque porte s'exécute même si une autre échoue ; le bilan échoue
+# s'il en manque une, et l'artefact n'est publié qu'après un bilan vert.
+#
+# Sortie : artefact (zip du site statique + SHA256SUMS + csp-hashes.txt).
 name: Evora web
 
 on:
@@ -42,6 +48,14 @@ env:
   BINARYEN_SHA256: e959f2170af4c20c552e9de3a0253704d6a9d2766e8fdb88e4d6ac4bae9388fe
   # Plafond de packaging/web/package.sh (24 MiB), affiché pour information seulement.
   UPSTREAM_WASM_LIMIT_BYTES: "25165824"
+  # Portes d'audit (EmbarkStudios, binaires musl officiels).
+  CARGO_DENY_VERSION: 0.20.2
+  CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+  CARGO_ABOUT_VERSION: 0.9.2
+  CARGO_ABOUT_SHA256: 9099a59e820c38a68b9d65f300662a567d56562f9a10f6aa4c7e86c17c2566af
+  # Portes à mesure tant que le patch correspondant n'est pas posé (report), bloquantes ensuite (block).
+  EVORA_GATE_TERMS: report
+  EVORA_GATE_CODE_EMOJI: report
 
 defaults:
   run:
@@ -99,7 +113,7 @@ jobs:
           restore-keys: |
             evora-web-${{ runner.os }}-rust-${{ env.RUST_TOOLCHAIN }}-
 
-      - name: Outils de build épinglés (Trunk, wasm-bindgen, wasm-opt)
+      - name: Outils épinglés (Trunk, wasm-bindgen, wasm-opt, cargo-deny, cargo-about)
         run: |
           tools="$RUNNER_TEMP/evora-tools"
           mkdir -p "$tools/dl" "$tools/bin" "$tools/wasm-bindgen" "$tools/binaryen"
@@ -116,6 +130,18 @@ jobs:
           fetch "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" \
             binaryen.tar.gz "$BINARYEN_SHA256"
           tar -xzf "$tools/dl/binaryen.tar.gz" -C "$tools/binaryen"
+          fetch "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            cargo-deny.tar.gz "$CARGO_DENY_SHA256"
+          mkdir -p "$tools/audit"
+          tar -xzf "$tools/dl/cargo-deny.tar.gz" -C "$tools/audit"
+          fetch "https://github.com/EmbarkStudios/cargo-about/releases/download/${CARGO_ABOUT_VERSION}/cargo-about-${CARGO_ABOUT_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            cargo-about.tar.gz "$CARGO_ABOUT_SHA256"
+          tar -xzf "$tools/dl/cargo-about.tar.gz" -C "$tools/audit"
+          for b in cargo-deny cargo-about; do
+            f=$(find "$tools/audit" -type f -name "$b" -print -quit)
+            [ -n "$f" ] || { echo "::error::$b introuvable après extraction"; exit 1; }
+            install -m 0755 "$f" "$tools/bin/$b"
+          done
           rm -f "$tools"/dl/*.tar.gz
           wb=$(find "$tools/wasm-bindgen" -type f -name wasm-bindgen -print -quit)
           wo=$(find "$tools/binaryen" -type f -name wasm-opt -print -quit)
@@ -131,20 +157,84 @@ jobs:
           wasm-opt --version
           [ "$(wasm-bindgen --version | cut -d' ' -f2)" = "$WASM_BINDGEN_VERSION" ]
           [ "version_$(wasm-opt --version | cut -d' ' -f3)" = "$BINARYEN_VERSION" ]
+          cargo deny --version
+          cargo about --version
+          [[ "$(cargo deny --version)" == *"$CARGO_DENY_VERSION"* ]]
+          [[ "$(cargo about --version)" == *"$CARGO_ABOUT_VERSION"* ]]
+          google-chrome --version
+          node --version
+          brotli --version
 
       - name: Dépendances (Cargo.lock verrouillé)
-        run: cargo fetch --locked
+        run: |
+          cargo fetch --locked
+          # Features du build web, telles qu'index.html les impose à Trunk (data-cargo-features) :
+          # cargo-deny et cargo-about auditent exactement ce graphe.
+          features=$(sed -n 's/.*data-cargo-features="\([^"]*\)".*/\1/p' apps/photocraft-web/index.html | head -n 1)
+          echo "EVORA_FEATURES=$features" >> "$GITHUB_ENV"
+          echo "Features du build web : ${features:-(aucune)}"
+
+      - name: Porte cargo-deny (licences, advisories, sources, doublons)
+        id: deny
+        continue-on-error: true
+        run: |
+          feat=()
+          [ -n "$EVORA_FEATURES" ] && feat=(--features "$EVORA_FEATURES")
+          set +e
+          cargo deny --manifest-path apps/photocraft-web/Cargo.toml --config evora/deny.toml \
+            --target wasm32-unknown-unknown --exclude-dev --locked "${feat[@]}" \
+            check --show-stats > "$RUNNER_TEMP/cargo-deny.log" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/cargo-deny.log"
+          errors=$(grep -c '^error' "$RUNNER_TEMP/cargo-deny.log" || true)
+          warnings=$(grep -c '^warning' "$RUNNER_TEMP/cargo-deny.log" || true)
+          {
+            echo "### Porte cargo-deny (bloquante)"
+            echo
+            echo "Graphe : apps/photocraft-web, wasm32-unknown-unknown, features \`${EVORA_FEATURES:-aucune}\`, sans dépendances de développement. Code de sortie : $status ; lignes error : $errors ; lignes warning : $warnings."
+            echo
+            echo '```'
+            grep -E '^ *(advisories|bans|licenses|sources) ' "$RUNNER_TEMP/cargo-deny.log" | tail -n 8 || true
+            echo '```'
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
       - name: Build web release (Trunk, hors ligne)
         working-directory: apps/photocraft-web
         run: |
           export PHOTOCRAFT_BUILD_SHA="$GITHUB_SHA"
           export PHOTOCRAFT_BUILD_DATE="$(date -u +%Y-%m-%d)"
-          # index.html choisit le profil wasm-release, la feature heif et wasm-opt -Oz.
+          # index.html choisit le profil wasm-release, les features et wasm-opt -Oz.
           # --offline accepte une valeur facultative : sans « =true », il avalerait « build ».
           trunk --offline=true build --release --locked
           test -s ../../dist/web/index.html
           git diff --exit-code -- ../../Cargo.lock
+
+      - name: Porte cargo-about (licences tierces agrégées)
+        id: about
+        continue-on-error: true
+        run: |
+          about="$RUNNER_TEMP/evora-about"
+          mkdir -p "$about"
+          feat=()
+          [ -n "$EVORA_FEATURES" ] && feat=(--features "$EVORA_FEATURES")
+          set +e
+          cargo about generate --locked --fail --manifest-path apps/photocraft-web/Cargo.toml \
+            -c evora/about.toml "${feat[@]}" -o "$about/THIRD-PARTY-RUST.html" \
+            evora/about.hbs > "$RUNNER_TEMP/cargo-about.log" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/cargo-about.log"
+          [ -s "$about/THIRD-PARTY-RUST.html" ] || status=1
+          {
+            echo "### Porte cargo-about (bloquante)"
+            echo
+            echo "Code de sortie : $status ; LICENSES/THIRD-PARTY-RUST.html : $(wc -c < "$about/THIRD-PARTY-RUST.html" 2>/dev/null || echo 0) octets, $(grep -c '<li>' "$about/THIRD-PARTY-RUST.html" 2>/dev/null || echo 0) entrées de liste."
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
       - name: Empaquetage du site statique
         run: |
@@ -157,10 +247,10 @@ jobs:
           fi
           ls "$site"/*.wasm >/dev/null
           name="evora-photocraft-web-${UPSTREAM_TAG}"
-          work="$RUNNER_TEMP/evora-package"
-          out="$RUNNER_TEMP/evora-out"
-          rm -rf "$work" "$out"
-          mkdir -p "$work/$name/LICENSES" "$out"
+          # Dossiers neufs à chaque exécution : rien à nettoyer.
+          work=$(mktemp -d "$RUNNER_TEMP/evora-package.XXXXXX")
+          out=$(mktemp -d "$RUNNER_TEMP/evora-out.XXXXXX")
+          mkdir -p "$work/$name/LICENSES"
           cp -R "$site/." "$work/$name/"
           # Licences et mentions (liste du Dockerfile amont). Contrairement à package.sh, ni
           # _headers ni .htaccess ni HOSTING.md : l'hébergement est l'affaire d'Evora (LUM-08).
@@ -170,6 +260,12 @@ jobs:
             "$work/$name/LICENSES/"
           # Patch E1 : la seule mention ArtCraft conservée, en texte simple, vit dans les mentions.
           cp evora/MENTIONS.txt "$work/$name/LICENSES/MENTIONS.txt"
+          # Licences des crates Rust embarquées (cargo-about), si la porte l'a produit.
+          if [ -s "$RUNNER_TEMP/evora-about/THIRD-PARTY-RUST.html" ]; then
+            cp "$RUNNER_TEMP/evora-about/THIRD-PARTY-RUST.html" "$work/$name/LICENSES/"
+          fi
+          # Empreintes CSP des scripts en ligne d'index.html (politique cible, ARCHITECTURE §3.6).
+          python3 -I evora/ci/csp_hashes.py "$work/$name/index.html" "$work/$name/csp-hashes.txt"
           {
             echo "upstream: storytold/photocraft ${UPSTREAM_TAG} (${UPSTREAM_COMMIT})"
             echo "fork: ${GITHUB_REPOSITORY} ${GITHUB_REF_NAME} (${GITHUB_SHA})"
@@ -178,96 +274,73 @@ jobs:
             echo "trunk: ${TRUNK_VERSION}"
             echo "wasm-bindgen: ${WASM_BINDGEN_VERSION}"
             echo "wasm-opt: ${BINARYEN_VERSION}"
+            echo "cargo-deny: ${CARGO_DENY_VERSION}"
+            echo "cargo-about: ${CARGO_ABOUT_VERSION}"
+            echo "features: ${EVORA_FEATURES}"
             echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } > "$work/$name/EVORA-BUILD.txt"
+          # Précompression des fichiers servis (le serveur choisit selon Accept-Encoding).
+          find "$work/$name" -path "$work/$name/LICENSES" -prune -o -type f \
+            \( -name '*.wasm' -o -name '*.js' -o -name '*.html' -o -name '*.css' \) -print0 \
+            | while IFS= read -r -d '' f; do
+                gzip -9 -n -k -f "$f"
+                brotli -q 11 -k -f "$f"
+              done
           (cd "$work" && zip -qrX9 "$out/$name.zip" "$name")
-          (cd "$out" && sha256sum "$name.zip" > SHA256SUMS)
+          cp "$work/$name/csp-hashes.txt" "$out/csp-hashes.txt"
+          (cd "$out" && sha256sum "$name.zip" csp-hashes.txt > SHA256SUMS)
           cat "$out/SHA256SUMS"
           ls -l "$out"
           echo "EVORA_PKG_DIR=$work/$name" >> "$GITHUB_ENV"
           echo "EVORA_OUT_DIR=$out" >> "$GITHUB_ENV"
           echo "EVORA_ARTIFACT=$name" >> "$GITHUB_ENV"
-
-      - name: Garde-fous (non bloquants, résumé du job)
-        continue-on-error: true
-        run: |
-          # Mesures seulement : aucune commande de ce pas ne doit interrompre le résumé.
-          set +e +o pipefail
-          pkg="$EVORA_PKG_DIR"
-          sum="$GITHUB_STEP_SUMMARY"
-          count() { # motif fichier...
-            local pattern="$1"; shift
-            cat "$@" 2>/dev/null | grep -a -o -F -- "$pattern" | wc -l | tr -d ' '
-          }
-          # Catalogues de traduction : build.rs de ui-egui les inclut compressés (deflate) dans le
-          # wasm. On les mesure décompressés depuis le OUT_DIR du build courant, et à la source.
-          inflated="$RUNNER_TEMP/evora-catalogs"
-          mkdir -p "$inflated"
-          outdir=$(find target -type f -path '*photocraft-ui-egui-*/out/i18n/keys.deflate' -printf '%T@ %h\n' \
-            | sort -rn | head -n 1 | cut -d' ' -f2-)
-          if [ -n "$outdir" ]; then
-            for f in "$outdir"/*.deflate; do
-              python3 -I -c 'import sys, zlib
-          data = open(sys.argv[1], "rb").read()
-          for wbits in (-15, 15, 31):
-              try:
-                  sys.stdout.buffer.write(zlib.decompress(data, wbits)); break
-              except zlib.error:
-                  pass' "$f" > "$inflated/$(basename "$f").txt"
-            done
-          fi
-          n_inflated=$(find "$inflated" -type f -size +0 | wc -l | tr -d ' ')
           {
-            echo "## Evora web : ${EVORA_ARTIFACT}"
+            echo "## Evora web : ${name}"
             echo
             echo "| Élément | Valeur |"
             echo "| --- | --- |"
             echo "| Amont | storytold/photocraft \`${UPSTREAM_TAG}\` (\`${UPSTREAM_COMMIT}\`) |"
             echo "| Branche | \`${GITHUB_REF_NAME}\` (\`${GITHUB_SHA}\`) |"
             echo "| Toolchain | ${RUSTC_VERSION} ; Trunk ${TRUNK_VERSION} ; wasm-bindgen ${WASM_BINDGEN_VERSION} ; wasm-opt ${BINARYEN_VERSION} |"
-            echo "| Archive | \`${EVORA_ARTIFACT}.zip\`, $(wc -c < "$EVORA_OUT_DIR/${EVORA_ARTIFACT}.zip" | tr -d ' ') octets |"
-            echo "| SHA-256 | \`$(cut -d' ' -f1 "$EVORA_OUT_DIR/SHA256SUMS")\` |"
+            echo "| Archive | \`${name}.zip\`, $(wc -c < "$out/${name}.zip" | tr -d ' ') octets |"
+            echo "| SHA-256 | \`$(grep "${name}.zip" "$out/SHA256SUMS" | cut -d' ' -f1)\` |"
             echo
-            echo "### Fichiers d'hébergement dans l'archive"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Portes Evora (marques, hébergement, licences, émojis, termes, CSP, taille)
+        id: gates
+        continue-on-error: true
+        run: python3 -I evora/ci/gates.py "$EVORA_PKG_DIR" "$RUNNER_TEMP/evora-gates.json"
+
+      - name: Test de fumée (Chrome sans interface, origine différente)
+        id: smoke
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          CHROME_BIN: google-chrome
+          SMOKE_TIMEOUT_MS: "180000"
+        run: node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke.json"
+
+      - name: Bilan des portes
+        env:
+          DENY: ${{ steps.deny.outcome }}
+          ABOUT: ${{ steps.about.outcome }}
+          GATES: ${{ steps.gates.outcome }}
+          SMOKE: ${{ steps.smoke.outcome }}
+        run: |
+          {
+            echo "### Bilan des portes"
             echo
-            hosting=$(cd "$pkg" && find . \( -name '_headers' -o -name '.htaccess' -o -name '*.conf' \
-              -o -name '*.php' -o -name '.*' -o -type l \) ! -name '.' -print | sort)
-            if [ -n "$hosting" ]; then
-              echo "Présents (à retirer, LUM-08) :"
-              echo
-              echo "$hosting" | sed 's/^/- `/; s/$/`/'
-            else
-              echo "Aucun (\`_headers\`, \`.htaccess\`, \`*.conf\`, \`*.php\`, fichiers cachés, liens symboliques)."
-            fi
-            echo
-            echo "### Taille du WebAssembly"
-            echo
-            echo "| Fichier | Octets | MiB | gzip -9 | brotli -q 11 | Plafond amont 24 MiB |"
-            echo "| --- | ---: | ---: | ---: | ---: | --- |"
-            for wasm in "$pkg"/*.wasm; do
-              bytes=$(wc -c < "$wasm" | tr -d ' ')
-              mib=$(awk -v n="$bytes" 'BEGIN { printf "%.2f", n / 1048576 }')
-              gz=$(gzip -9 -c "$wasm" | wc -c | tr -d ' ')
-              if command -v brotli >/dev/null; then br=$(brotli -c -q 11 "$wasm" | wc -c | tr -d ' '); else br="n/d"; fi
-              if [ "$bytes" -gt "$UPSTREAM_WASM_LIMIT_BYTES" ]; then gate="au-dessus"; else gate="en dessous"; fi
-              echo "| \`$(basename "$wasm")\` | $bytes | $mib | $gz | $br | $gate |"
-            done
-            echo
-            echo "### Marques (mesure de la cible E1)"
-            echo
-            echo "| Terme | wasm + js + html servis | catalogues décompressés du build ($n_inflated fichiers) | catalogues source (.tsv) |"
-            echo "| --- | ---: | ---: | ---: |"
-            for term in ArtCraft getartcraft discord.gg PhotoCraft; do
-              b=$(count "$term" "$pkg"/*.wasm "$pkg"/*.js "$pkg"/index.html)
-              c=$(count "$term" "$inflated"/*.txt)
-              s=$(count "$term" crates/ui-egui/src/i18n/*.tsv)
-              echo "| \`$term\` | $b | $c | $s |"
-            done
-            echo
-            echo "Garde-fous non bloquants pour cette première passe (EVORA-LUM-00) ; ils deviendront des portes avec E1 et LUM-08."
-          } >> "$sum"
-          cat "$sum"
-          exit 0
+            echo "| Porte | Résultat |"
+            echo "| --- | --- |"
+            echo "| cargo-deny | $DENY |"
+            echo "| cargo-about | $ABOUT |"
+            echo "| Portes Evora | $GATES |"
+            echo "| Test de fumée | $SMOKE |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for o in "$DENY" "$ABOUT" "$GATES" "$SMOKE"; do
+            [ "$o" = "success" ] || { echo "::error::une porte bloquante a échoué (deny=$DENY about=$ABOUT gates=$GATES smoke=$SMOKE)"; exit 1; }
+          done
 
       - name: Artefact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -276,5 +349,6 @@ jobs:
           path: |
             ${{ env.EVORA_OUT_DIR }}/${{ env.EVORA_ARTIFACT }}.zip
             ${{ env.EVORA_OUT_DIR }}/SHA256SUMS
+            ${{ env.EVORA_OUT_DIR }}/csp-hashes.txt
           if-no-files-found: error
           compression-level: 0

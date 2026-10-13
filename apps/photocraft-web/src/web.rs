@@ -85,10 +85,19 @@ pub fn start() {
             // theme imposed at every start.
             None => (host_language(query_param(&q, "lang").as_deref()), host_theme(query_param(&q, "theme").as_deref())),
         };
-        // Evora build (patch E5): the storage namespace, before any storage is read, and the
-        // host's `evora:purge` (accepted from `?parentOrigin=` only).
-        crate::storage_ns::init(query_param(&q, "storageNs").as_deref());
-        crate::storage_ns::listen_purge(query_param(&q, "parentOrigin"), crate::indexed_presets::DATABASE);
+        // Evora build (patch E5, corrected with E4): the storage namespace comes only from
+        // `evora:init`, before any storage is read (never from the URL); with `storage.purge`, the
+        // other namespaces and upstream's bare names are deleted first (HOST-PROTOCOL §7.7 b).
+        // Without the bridge, upstream's names.
+        match (&bridge, &init) {
+            (Some(bridge), Some(init)) => {
+                crate::storage_ns::scope(&init.storage_ns, bridge.has("storage.ns"));
+                if bridge.has("storage.purge") {
+                    crate::storage_ns::purge_others(&init.storage_ns).await;
+                }
+            }
+            _ => crate::storage_ns::shared(),
+        }
         let force_cpu = query_flag(&q, "cpu");
         let mut options = eframe::WebOptions::default();
         photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
@@ -101,8 +110,9 @@ pub fn start() {
         // user deletion/reorder. Storage denial or timeout still opens a usable session.
         let (database, presets, mut preset_warnings) = match crate::indexed_presets::load().await {
             Ok((db, bridge, warnings)) => {
-                crate::storage_ns::register_database(&db);
-                (Some(db), bridge, warnings)
+                // Evora build (patch E5): a purge that arrived meanwhile closes it at once.
+                let db = crate::storage_ns::register_database(&db).then_some(db);
+                (db, bridge, warnings)
             }
             Err(e) => {
                 let bridge = crate::preset_bridge::Bridge::default();
@@ -394,7 +404,10 @@ impl WebShell {
             let wake = ctx.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let result = crate::indexed_presets::write(&db, &batch).await;
-                if let Err(e) = &result {
+                // Evora build (patch E5): a write cut short by `evora:purge` is expected.
+                if let Err(e) = &result
+                    && !crate::storage_ns::purged()
+                {
                     log::error!("Could not save browser presets: {e}");
                 }
                 presets.finish(batch, result);
@@ -583,16 +596,14 @@ fn services(inbox: Inbox, place_inbox: Inbox, cursor_pos: photocraft_ui_egui::Cu
         })),
         // Preferences live in the browser's localStorage, under the host's storage namespace
         // (patch E5). A refused or purged namespace reads nothing and writes nothing.
-        load_prefs: Some(Box::new(|| local_storage()?.get_item(&crate::storage_ns::key(PREFS_KEY)?).ok().flatten())),
+        load_prefs: Some(Box::new(|| local_storage()?.get_item(&crate::storage_ns::key(crate::storage_ns::PREFS_KEY)?).ok().flatten())),
         save_prefs: Some(Box::new(|text: &str| {
-            let Some(key) = crate::storage_ns::key(PREFS_KEY) else { return Ok(()) };
+            let Some(key) = crate::storage_ns::key(crate::storage_ns::PREFS_KEY) else { return Ok(()) };
             local_storage().ok_or("no localStorage")?.set_item(&key, text).map_err(|e| format!("{e:?}"))
         })),
         ..Default::default()
     }
 }
-
-const PREFS_KEY: &str = "photocraft.preferences";
 
 fn local_storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()

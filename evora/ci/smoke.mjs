@@ -30,6 +30,9 @@ const ALLOWED_404 = ['/fonts/manifest.txt'];
 const QUERY = process.env.SMOKE_QUERY || 'webgl';
 const EXPECT_LANG = process.env.SMOKE_EXPECT_LANG || '';
 const STORAGE_NS = process.env.SMOKE_STORAGE_NS || '';
+// E5 : purge de l'espace de noms par evora:purge (témoins : message d'un autre espace de noms,
+// message venu du moteur lui-même ; puis le vrai message de la page parente).
+const PURGE = process.env.SMOKE_PURGE === '1';
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -89,10 +92,10 @@ function engineHandler(state) {
   };
 }
 
-function parentHandler(engineOrigin) {
+function parentHandler(engineOrigin, parentOrigin) {
   const page = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Evora : page parente du test de fumée</title>
 <link rel="icon" href="data:,"></head><body style="margin:0;background:#fff">
-<iframe id="engine" src="${engineOrigin}/index.html?${QUERY}" width="1280" height="800" style="border:0;display:block"
+<iframe id="engine" src="${engineOrigin}/index.html?${QUERY.replace('{{PARENT_ORIGIN}}', encodeURIComponent(parentOrigin))}" width="1280" height="800" style="border:0;display:block"
  sandbox="allow-scripts allow-same-origin" allow="fullscreen; clipboard-read; clipboard-write"></iframe>
 </body></html>`;
   return (req, res) => {
@@ -175,8 +178,11 @@ async function main() {
   const state = { notFound: [], policy: '' };
   const engine = await listen(engineHandler(state));
   const engineOrigin = `http://127.0.0.1:${engine.address().port}`;
-  const parent = await listen(parentHandler(engineOrigin));
+  // L'origine B n'est connue qu'une fois le port attribué : le gestionnaire la lit à chaque requête.
+  const origins = { parent: '' };
+  const parent = await listen((req, res) => parentHandler(engineOrigin, origins.parent)(req, res));
   const parentOrigin = `http://localhost:${parent.address().port}`;
+  origins.parent = parentOrigin;
   state.policy = policyFor(parentOrigin);
   report.engineOrigin = engineOrigin;
   report.parentOrigin = parentOrigin;
@@ -290,6 +296,22 @@ async function main() {
     last = JSON.parse(r.result.value);
     const st = await c.send('Runtime.evaluate', { expression: STORAGE, returnByValue: true, awaitPromise: true }, frameSession);
     report.storage = JSON.parse(st.result.value);
+    if (PURGE && STORAGE_NS) {
+      const storage = async () => JSON.parse((await c.send('Runtime.evaluate', { expression: STORAGE, returnByValue: true, awaitPromise: true }, frameSession)).result.value);
+      const fromParent = (ns) => c.send('Runtime.evaluate', {
+        expression: `document.getElementById('engine').contentWindow.postMessage({ type: 'evora:purge', storageNs: ${JSON.stringify(ns)} }, ${JSON.stringify(engineOrigin)}); true`,
+      }, page);
+      await fromParent('autreEspaceDeNoms');
+      await c.send('Runtime.evaluate', {
+        expression: `window.postMessage({ type: 'evora:purge', storageNs: ${JSON.stringify(STORAGE_NS)} }, '*'); true`,
+      }, frameSession);
+      await sleep(1000);
+      const witness = await storage();
+      await fromParent(STORAGE_NS);
+      await sleep(2500);
+      const after = await storage();
+      report.purge = { witness, after };
+    }
   }
   report.frame = { url: frameUrl, state: last };
   if (report.coldStartMs === undefined) report.coldStartMs = null;
@@ -317,6 +339,15 @@ async function main() {
     const dbsOutside = (st.dbs || []).filter((d) => !d.startsWith(`${STORAGE_NS}:`));
     if (dbsOutside.length) problems.push(`bases IndexedDB hors de l'espace de noms : ${dbsOutside.join(', ')}`);
   }
+  if (PURGE && STORAGE_NS) {
+    const pg = report.purge;
+    const mine = (st) => ({ keys: (st.keys || []).filter((k) => k.startsWith(`${STORAGE_NS}:`)), dbs: (st.dbs || []).filter((d) => d.startsWith(`${STORAGE_NS}:`)) });
+    if (!pg) problems.push('test de purge non exécuté');
+    else {
+      if (!mine(pg.witness).keys.length) problems.push('témoin : un message invalide (autre espace de noms ou autre source) a purgé le stockage');
+      if (mine(pg.after).keys.length || mine(pg.after).dbs.length) problems.push(`purge incomplète : ${JSON.stringify(mine(pg.after))}`);
+    }
+  }
   report.problems = problems;
   report.ok = problems.length === 0;
   if (!report.ok && stderr) report.chromeStderr = stderr.split('\n').slice(-40);
@@ -334,6 +365,7 @@ async function main() {
     `| Titre du document moteur | ${last ? last.title : '—'} |`,
     `| Paramètres du moteur | \`?${QUERY}\` |`,
     `| Stockage (localStorage / IndexedDB) | ${report.storage ? `${report.storage.keys.join(', ') || 'aucune clé'} / ${(report.storage.dbs || []).join(', ') || 'aucune base'}` : '—'} |`,
+    `| Purge evora:purge (témoin / après) | ${report.purge ? `${report.purge.witness.keys.length} clé(s), ${(report.purge.witness.dbs || []).length} base(s) / ${report.purge.after.keys.length} clé(s), ${(report.purge.after.dbs || []).length} base(s)` : '—'} |`,
     `| Langue des préférences | ${report.storage ? report.storage.language ?? '—' : '—'}${EXPECT_LANG ? ` (attendue : ${EXPECT_LANG})` : ''} |`,
     `| Erreurs de page | ${report.errors.length} |`,
     `| Exceptions admises (404 fonts/manifest.txt) | ${report.allowed.length} |`,

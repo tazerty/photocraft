@@ -8,7 +8,8 @@ use web_sys::{Blob, Event, EventTarget, IdbDatabase, IdbRequest, IdbTransactionM
 use crate::preset_bridge::{Batch, Bridge, MAX_RECORDS, record_limit};
 use photocraft_engine::preset_store::MAX_STORE_BYTES;
 
-const DATABASE: &str = "photocraft.presets";
+/// The presets database's name, inside the host's storage namespace (patch E5, `storage_ns`).
+pub const DATABASE: &str = "photocraft.presets";
 const FILES: &str = "files";
 const TIMEOUT_MS: f64 = 10_000.0;
 
@@ -98,7 +99,10 @@ async fn before(promise: &Promise, deadline: f64) -> Result<JsValue, String> {
 
 async fn open(deadline: f64) -> Result<IdbDatabase, String> {
     let factory = web_sys::window().ok_or("no window")?.indexed_db().map_err(js)?.ok_or("IndexedDB unavailable")?;
-    let req = factory.open_with_u32(DATABASE, 1).map_err(js)?;
+    // Evora build (patch E5): the name carries the host's storage namespace; a refused namespace
+    // (malformed `storageNs`) or a purged one opens nothing (presets stay session-only).
+    let name = crate::storage_ns::key(DATABASE).ok_or("browser storage refused (storageNs)")?;
+    let req = factory.open_with_u32(&name, 1).map_err(js)?;
     let mut upgrade = Listeners::new();
     let upgrade_req = req.clone();
     upgrade

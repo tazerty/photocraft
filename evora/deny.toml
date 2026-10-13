@@ -1,0 +1,59 @@
+# cargo-deny : politique Evora pour le build web de Lumbra (fork tazerty/photocraft).
+#
+# L'amont n'a pas de deny.toml (aucune politique de licences ni d'audit d'advisories) : ce fichier
+# est minimal et écrit par Evora. Il ne relâche rien en silence : chaque licence admise et chaque
+# exception est listée ici, avec sa raison ; les avertissements de cargo-deny (doublons de
+# versions, licences admises inutilisées) restent affichés dans le journal et dans le résumé du job.
+#
+# Graphe audité : la crate apps/photocraft-web (ce que l'artefact web embarque), cible
+# wasm32-unknown-unknown, dépendances de développement exclues, features passées par la CI
+# d'après index.html (data-cargo-features). Lancé par .github/workflows/evora-web.yml.
+
+[graph]
+targets = ["wasm32-unknown-unknown"]
+exclude-dev = true
+
+[advisories]
+# Base RustSec, clonée en CI. Vulnérabilités et avis « unsound » : erreurs. Crates non maintenues :
+# erreur aussi (valeur par défaut « all », rappelée ici). Versions retirées (yanked) : erreur.
+unmaintained = "all"
+unsound = "all"
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Licences permissives admises pour le code embarqué dans le wasm. Aucune licence copyleft (GPL,
+# LGPL, AGPL) : un paquet qui n'offre qu'une telle licence fait échouer la porte.
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unlicense",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
+exceptions = []
+
+[licenses.private]
+# Les crates du dépôt non publiées (photocraft-*) sont sous MIT OR Apache-2.0 (Cargo.toml du
+# workspace) ; elles restent auditées comme les autres.
+ignore = false
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# craft-ui (storytold/craft-libs, Apache-2.0), épinglée par révision dans Cargo.lock.
+allow-git = ["https://github.com/storytold/craft-libs"]

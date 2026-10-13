@@ -26,6 +26,10 @@ const TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS || 120000);
 const SETTLE_MS = 3000;
 const CHROME = process.env.CHROME_BIN || 'google-chrome';
 const ALLOWED_404 = ['/fonts/manifest.txt'];
+// Paramètres passés au moteur (E3 : langue imposée ; E5 : espace de noms du stockage) et attentes.
+const QUERY = process.env.SMOKE_QUERY || 'webgl';
+const EXPECT_LANG = process.env.SMOKE_EXPECT_LANG || '';
+const STORAGE_NS = process.env.SMOKE_STORAGE_NS || '';
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -88,7 +92,7 @@ function engineHandler(state) {
 function parentHandler(engineOrigin) {
   const page = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Evora : page parente du test de fumée</title>
 <link rel="icon" href="data:,"></head><body style="margin:0;background:#fff">
-<iframe id="engine" src="${engineOrigin}/index.html?webgl" width="1280" height="800" style="border:0;display:block"
+<iframe id="engine" src="${engineOrigin}/index.html?${QUERY}" width="1280" height="800" style="border:0;display:block"
  sandbox="allow-scripts allow-same-origin" allow="fullscreen; clipboard-read; clipboard-write"></iframe>
 </body></html>`;
   return (req, res) => {
@@ -154,6 +158,16 @@ const STATE = `JSON.stringify((() => {
     loading: l ? l.textContent.trim().slice(0, 300) : null,
     canvas: c ? { width: c.width, height: c.height, client: [c.clientWidth, c.clientHeight] } : null };
 })())`;
+
+// Stockage du document moteur : clés localStorage et bases IndexedDB (E3, E5).
+const STORAGE = `(async () => {
+  const keys = Object.keys(localStorage);
+  const prefsKey = keys.find((k) => k.endsWith('photocraft.preferences')) || null;
+  let language = null;
+  try { language = prefsKey ? (JSON.parse(localStorage.getItem(prefsKey)).interface || {}).language ?? null : null; } catch { language = 'illisible'; }
+  const dbs = indexedDB.databases ? (await indexedDB.databases()).map((d) => d.name) : null;
+  return JSON.stringify({ keys, prefsKey, language, dbs });
+})()`;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -274,6 +288,8 @@ async function main() {
     await sleep(SETTLE_MS);
     const r = await c.send('Runtime.evaluate', { expression: STATE, returnByValue: true }, frameSession);
     last = JSON.parse(r.result.value);
+    const st = await c.send('Runtime.evaluate', { expression: STORAGE, returnByValue: true, awaitPromise: true }, frameSession);
+    report.storage = JSON.parse(st.result.value);
   }
   report.frame = { url: frameUrl, state: last };
   if (report.coldStartMs === undefined) report.coldStartMs = null;
@@ -292,6 +308,15 @@ async function main() {
   if (last && last.parent !== parentOrigin) problems.push(`origine parente inattendue : ${last && last.parent}`);
   const stray404 = state.notFound.filter((p) => !ALLOWED_404.includes(p));
   if (stray404.length) problems.push(`404 inattendus : ${stray404.join(', ')}`);
+  const st = report.storage || { keys: [], dbs: [] };
+  if (EXPECT_LANG && st.language !== EXPECT_LANG) problems.push(`langue imposée non appliquée : préférence ${st.language}, attendu ${EXPECT_LANG}`);
+  if (STORAGE_NS) {
+    const outside = st.keys.filter((k) => !k.startsWith(`${STORAGE_NS}:`));
+    if (outside.length) problems.push(`clés localStorage hors de l'espace de noms : ${outside.join(', ')}`);
+    if (!st.keys.includes(`${STORAGE_NS}:photocraft.preferences`)) problems.push(`préférences absentes de l'espace de noms ${STORAGE_NS}`);
+    const dbsOutside = (st.dbs || []).filter((d) => !d.startsWith(`${STORAGE_NS}:`));
+    if (dbsOutside.length) problems.push(`bases IndexedDB hors de l'espace de noms : ${dbsOutside.join(', ')}`);
+  }
   report.problems = problems;
   report.ok = problems.length === 0;
   if (!report.ok && stderr) report.chromeStderr = stderr.split('\n').slice(-40);
@@ -307,6 +332,9 @@ async function main() {
     `| Délai mesuré depuis la navigation parente | ${report.wallClockMs ?? '—'} ms |`,
     `| Canvas | ${last && last.canvas ? `${last.canvas.width}×${last.canvas.height}` : 'absent'} |`,
     `| Titre du document moteur | ${last ? last.title : '—'} |`,
+    `| Paramètres du moteur | \`?${QUERY}\` |`,
+    `| Stockage (localStorage / IndexedDB) | ${report.storage ? `${report.storage.keys.join(', ') || 'aucune clé'} / ${(report.storage.dbs || []).join(', ') || 'aucune base'}` : '—'} |`,
+    `| Langue des préférences | ${report.storage ? report.storage.language ?? '—' : '—'}${EXPECT_LANG ? ` (attendue : ${EXPECT_LANG})` : ''} |`,
     `| Erreurs de page | ${report.errors.length} |`,
     `| Exceptions admises (404 fonts/manifest.txt) | ${report.allowed.length} |`,
     `| Avertissements de console | ${report.warnings.length} |`,

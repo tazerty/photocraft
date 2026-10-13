@@ -1,5 +1,9 @@
-//! egui's default fonts (Ubuntu Light, Hack, Noto Emoji and emoji-icon-font: the fallback stack
-//! behind Inter and JetBrains Mono, for symbols and emoji), stored deflated.
+//! egui's default fonts (Ubuntu Light, Hack and emoji-icon-font: the fallback stack behind Inter
+//! and JetBrains Mono, for symbols), stored deflated.
+//!
+//! Evora build (patch E10, no emoji in the interface): egui's Noto Emoji face is left out of the
+//! stack and of the binary, so no string can be drawn as an emoji glyph; the CI gate resolves every
+//! symbol of the displayed catalogs against this stack.
 //!
 //! egui's `default_fonts` feature embeds them uncompressed (1.4 MB), which the web build's 24 MiB
 //! size gate (packaging/web/package.sh) can't afford. The app builds egui without it; build.rs
@@ -19,7 +23,6 @@ macro_rules! deflated {
 }
 
 static HACK: LazyLock<Vec<u8>> = LazyLock::new(|| inflate(deflated!("Hack-Regular")));
-static NOTO_EMOJI: LazyLock<Vec<u8>> = LazyLock::new(|| inflate(deflated!("NotoEmoji-Regular")));
 static UBUNTU_LIGHT: LazyLock<Vec<u8>> = LazyLock::new(|| inflate(deflated!("Ubuntu-Light")));
 static EMOJI_ICON: LazyLock<Vec<u8>> = LazyLock::new(|| inflate(deflated!("emoji-icon-font")));
 
@@ -36,21 +39,32 @@ fn inflate(deflated: &[u8]) -> Vec<u8> {
     }
 }
 
+/// The emoji face of egui's defaults, left out of the Evora build (patch E10).
+const NOTO_EMOJI: &str = "NotoEmoji-Regular";
+
 /// `FontDefinitions::default()` with egui's default fonts, whether or not egui was built with
-/// `default_fonts`: the same faces, tweaks and family order.
+/// `default_fonts`: the same faces, tweaks and family order, without the emoji face (patch E10).
 pub fn definitions() -> FontDefinitions {
     let fonts = FontDefinitions::default();
-    if fonts.font_data.is_empty() { from_deflated() } else { fonts }
+    without_emoji(if fonts.font_data.is_empty() { from_deflated() } else { fonts })
+}
+
+/// `fonts` without egui's Noto Emoji face, in its data and in every family stack.
+fn without_emoji(mut fonts: FontDefinitions) -> FontDefinitions {
+    fonts.font_data.remove(NOTO_EMOJI);
+    for stack in fonts.families.values_mut() {
+        stack.retain(|name| name != NOTO_EMOJI);
+    }
+    fonts
 }
 
 /// egui's default definitions, built from the deflated copies.
 fn from_deflated() -> FontDefinitions {
     let mut fonts = FontDefinitions::empty();
-    let faces: [(&str, &'static [u8], f32); 4] = [
+    let faces: [(&str, &'static [u8], f32); 3] = [
         ("Hack", HACK.as_slice(), 1.0),
-        // egui draws its emoji fonts a little smaller.
-        ("NotoEmoji-Regular", NOTO_EMOJI.as_slice(), 0.81),
         ("Ubuntu-Light", UBUNTU_LIGHT.as_slice(), 1.0),
+        // egui draws its icon font a little smaller.
         ("emoji-icon-font", EMOJI_ICON.as_slice(), 0.90),
     ];
     for (name, bytes, scale) in faces {
@@ -62,8 +76,8 @@ fn from_deflated() -> FontDefinitions {
         fonts.font_data.insert(name.to_owned(), Arc::new(data));
     }
     let stack = |names: &[&str]| -> Vec<String> { names.iter().filter(|n| fonts.font_data.contains_key(**n)).map(|n| (*n).to_owned()).collect() };
-    let mono = stack(&["Hack", "Ubuntu-Light", "NotoEmoji-Regular", "emoji-icon-font"]);
-    let proportional = stack(&["Ubuntu-Light", "NotoEmoji-Regular", "emoji-icon-font"]);
+    let mono = stack(&["Hack", "Ubuntu-Light", "emoji-icon-font"]);
+    let proportional = stack(&["Ubuntu-Light", "emoji-icon-font"]);
     fonts.families.insert(FontFamily::Monospace, mono);
     fonts.families.insert(FontFamily::Proportional, proportional);
     fonts
@@ -73,14 +87,18 @@ fn from_deflated() -> FontDefinitions {
 mod tests {
     use super::*;
 
-    /// The definitions built from the deflated copies are egui's own: the same bytes, tweaks and
-    /// family order (test builds enable `default_fonts`, so `FontDefinitions::default()` is egui's).
+    /// The definitions built from the deflated copies are egui's own, without the emoji face: the
+    /// same bytes, tweaks and family order (test builds enable `default_fonts`, so
+    /// `FontDefinitions::default()` is egui's).
     #[test]
-    fn deflated_fonts_match_egui_defaults() {
+    fn deflated_fonts_match_egui_defaults_without_emoji() {
         let egui = FontDefinitions::default();
         assert!(!egui.font_data.is_empty(), "test builds enable egui's default_fonts (dev-dependencies)");
-        assert_eq!(from_deflated(), egui);
-        assert_eq!(definitions(), egui);
+        let expected = without_emoji(egui);
+        assert_eq!(from_deflated(), expected);
+        assert_eq!(definitions(), expected);
+        assert!(!definitions().font_data.contains_key(NOTO_EMOJI));
+        assert!(definitions().families.values().all(|stack| !stack.iter().any(|n| n == NOTO_EMOJI)));
     }
 
     #[test]

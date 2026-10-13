@@ -36,10 +36,11 @@ const ALLOWED_404 = ['/fonts/manifest.txt'];
 const QUERY = process.env.SMOKE_QUERY || 'webgl';
 const EXPECT_LANG = process.env.SMOKE_EXPECT_LANG || '';
 const EXPECT_THEME = process.env.SMOKE_EXPECT_THEME || '';
-const STORAGE_NS = process.env.SMOKE_STORAGE_NS || '';
-// E5 : purge de l'espace de noms par evora:purge (témoins : message d'un autre espace de noms,
-// message venu du moteur lui-même ; puis le vrai message de la page parente).
-const PURGE = process.env.SMOKE_PURGE === '1';
+// E5 corrigé (avec E4) : hors pont, un ?storageNs= dans l'URL est ignoré (noms de l'amont), et
+// l'ancien message de purge nu ({type: "evora:purge", storageNs}, avec ?parentOrigin=) ne purge rien.
+// L'espace de noms et la purge ne passent plus que par le pont EHP (scénario pont-ehp).
+const URL_NS = process.env.SMOKE_URL_STORAGE_NS || '';
+const OLD_PURGE = process.env.SMOKE_OLD_PURGE === '1';
 // E6 : langue du navigateur (navigator.languages), pour que le moteur charge les polices servies
 // de cette écriture, et exigence de polices servies (manifeste lu, au moins une police reçue).
 const BROWSER_LANG = process.env.SMOKE_BROWSER_LANG || '';
@@ -280,6 +281,9 @@ async function main() {
             await c.send('Log.enable', {}, frameSession);
             await c.send('Page.enable', {}, frameSession);
             await c.send('Page.addScriptToEvaluateOnNewDocument', { source: READY_PROBE }, frameSession);
+            // E5 : restes d'autres comptes et de l'amont, et noms d'un autre moteur de la même
+            // origine, posés avant le démarrage du moteur (evora:init doit purger les premiers).
+            if (EHP) await c.send('Page.addScriptToEvaluateOnNewDocument', { source: ehp.SEED_JS }, frameSession);
             await c.send('Runtime.runIfWaitingForDebugger', {}, frameSession);
           })().catch((e) => report.errors.push(`attache de l'iframe : ${e.message}`));
         } else if (p.waitingForDebugger) {
@@ -323,6 +327,12 @@ async function main() {
   await c.send('Runtime.enable', {}, page);
   await c.send('Log.enable', {}, page);
   await c.send('Page.enable', {}, page);
+  // Hors pont : tout message reçu par la page parente est relevé (aucun n'est attendu du moteur).
+  if (!EHP) {
+    await c.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: "window.__parentMessages = []; addEventListener('message', (e) => window.__parentMessages.push({ origin: e.origin, data: (() => { try { return JSON.parse(JSON.stringify(e.data)); } catch { return String(e.data); } })() }));",
+    }, page);
+  }
   await c.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, page);
   const t0 = Date.now();
   await c.send('Page.navigate', { url: `${parentOrigin}/` }, page);
@@ -375,26 +385,23 @@ async function main() {
     }
     const st = await c.send('Runtime.evaluate', { expression: STORAGE, returnByValue: true, awaitPromise: true }, frameSession);
     report.storage = JSON.parse(st.result.value);
-    if (PURGE && STORAGE_NS) {
-      const storage = async () => JSON.parse((await c.send('Runtime.evaluate', { expression: STORAGE, returnByValue: true, awaitPromise: true }, frameSession)).result.value);
-      const fromParent = (ns) => c.send('Runtime.evaluate', {
-        expression: `document.getElementById('engine').contentWindow.postMessage({ type: 'evora:purge', storageNs: ${JSON.stringify(ns)} }, ${JSON.stringify(engineOrigin)}); true`,
-      }, page);
-      await fromParent('autreEspaceDeNoms');
+    if (OLD_PURGE && URL_NS && !bench) {
+      // L'ancienne purge, désormais sans effet : le stockage de l'amont doit rester intact.
       await c.send('Runtime.evaluate', {
-        expression: `window.postMessage({ type: 'evora:purge', storageNs: ${JSON.stringify(STORAGE_NS)} }, '*'); true`,
-      }, frameSession);
-      await sleep(1000);
-      const witness = await storage();
-      await fromParent(STORAGE_NS);
+        expression: `document.getElementById('engine').contentWindow.postMessage({ type: 'evora:purge', storageNs: ${JSON.stringify(URL_NS)} }, ${JSON.stringify(engineOrigin)}); true`,
+      }, page);
       await sleep(2500);
-      const after = await storage();
-      report.purge = { witness, after };
+      const after = await c.send('Runtime.evaluate', { expression: STORAGE, returnByValue: true, awaitPromise: true }, frameSession);
+      report.oldPurge = JSON.parse(after.result.value);
+    }
+    if (!bench) {
+      const m = await c.send('Runtime.evaluate', { expression: 'JSON.stringify(window.__parentMessages || null)', returnByValue: true }, page);
+      report.parentMessages = JSON.parse(m.result.value);
     }
   }
   if (bench) {
     try { await bench.refresh(); } catch { /* journal déjà relevé */ }
-    report.ehp = { ids: bench.ids, exchanges: bench.summary(), problems: bench.verify(report.storage) };
+    report.ehp = { ids: bench.ids, exchanges: bench.summary(), storage: bench.storageLog, problems: bench.verify() };
   }
   report.frame = { url: frameUrl, state: last };
   if (report.coldStartMs === undefined) report.coldStartMs = null;
@@ -417,21 +424,22 @@ async function main() {
   const st = report.storage || { keys: [], dbs: [] };
   if (EXPECT_THEME && st.theme !== EXPECT_THEME) problems.push(`thème imposé non appliqué : préférence ${st.theme}, attendu ${EXPECT_THEME}`);
   if (EXPECT_LANG && st.language !== EXPECT_LANG) problems.push(`langue imposée non appliquée : préférence ${st.language}, attendu ${EXPECT_LANG}`);
-  if (STORAGE_NS) {
-    const outside = st.keys.filter((k) => !k.startsWith(`${STORAGE_NS}:`));
-    if (outside.length) problems.push(`clés localStorage hors de l'espace de noms : ${outside.join(', ')}`);
-    if (!st.keys.includes(`${STORAGE_NS}:photocraft.preferences`)) problems.push(`préférences absentes de l'espace de noms ${STORAGE_NS}`);
-    const dbsOutside = (st.dbs || []).filter((d) => !d.startsWith(`${STORAGE_NS}:`));
-    if (dbsOutside.length) problems.push(`bases IndexedDB hors de l'espace de noms : ${dbsOutside.join(', ')}`);
+  if (URL_NS && !bench) {
+    // Hors pont : noms de l'amont, le ?storageNs= de l'URL n'a aucun effet.
+    if (!st.keys.includes('photocraft.preferences')) problems.push(`hors pont : préférences absentes sous le nom de l'amont (clés : ${st.keys.join(', ')})`);
+    const fromUrl = st.keys.filter((k) => k.startsWith(`${URL_NS}:`)).concat((st.dbs || []).filter((d) => d.startsWith(`${URL_NS}:`)));
+    if (fromUrl.length) problems.push(`hors pont : l'espace de noms de l'URL a été appliqué (${fromUrl.join(', ')})`);
+    if (st.dbs && !st.dbs.includes('photocraft.presets')) problems.push(`hors pont : base des préréglages absente sous le nom de l'amont (bases : ${st.dbs.join(', ')})`);
   }
-  if (PURGE && STORAGE_NS) {
-    const pg = report.purge;
-    const mine = (st) => ({ keys: (st.keys || []).filter((k) => k.startsWith(`${STORAGE_NS}:`)), dbs: (st.dbs || []).filter((d) => d.startsWith(`${STORAGE_NS}:`)) });
-    if (!pg) problems.push('test de purge non exécuté');
-    else {
-      if (!mine(pg.witness).keys.length) problems.push('témoin : un message invalide (autre espace de noms ou autre source) a purgé le stockage');
-      if (mine(pg.after).keys.length || mine(pg.after).dbs.length) problems.push(`purge incomplète : ${JSON.stringify(mine(pg.after))}`);
+  if (OLD_PURGE && URL_NS && !bench) {
+    const after = report.oldPurge;
+    if (!after) problems.push('hors pont : contrôle de l\'ancienne purge non exécuté');
+    else if (!after.keys.includes('photocraft.preferences') || (after.dbs && !after.dbs.includes('photocraft.presets'))) {
+      problems.push(`hors pont : l'ancien message de purge (sans pont) a encore effacé le stockage : ${JSON.stringify(after)}`);
     }
+  }
+  if (!bench && report.parentMessages && report.parentMessages.length) {
+    problems.push(`hors pont : le moteur a écrit à la page parente : ${JSON.stringify(report.parentMessages).slice(0, 300)}`);
   }
   if (EXPECT_FONTS) {
     const served = Object.keys(report.served);
@@ -457,7 +465,7 @@ async function main() {
     `| Paramètres du moteur | \`?${QUERY}\` |`,
     ...(report.ehp ? [`| Échanges EHP vus de la page parente | ${report.ehp.exchanges.length} message(s) du moteur |`] : []),
     `| Stockage (localStorage / IndexedDB) | ${report.storage ? `${report.storage.keys.join(', ') || 'aucune clé'} / ${(report.storage.dbs || []).join(', ') || 'aucune base'}` : '—'} |`,
-    `| Purge evora:purge (témoin / après) | ${report.purge ? `${report.purge.witness.keys.length} clé(s), ${(report.purge.witness.dbs || []).length} base(s) / ${report.purge.after.keys.length} clé(s), ${(report.purge.after.dbs || []).length} base(s)` : '—'} |`,
+    `| Ancienne purge hors pont (sans effet attendu) | ${report.oldPurge ? `${report.oldPurge.keys.length} clé(s), ${(report.oldPurge.dbs || []).length} base(s) après le message` : '—'} |`,
     `| Polices servies reçues | ${Object.keys(report.served).filter((k) => k.startsWith('/fonts/')).join(', ') || 'aucune'} |`,
     `| Thème des préférences | ${report.storage ? report.storage.theme ?? '—' : '—'}${EXPECT_THEME ? ` (attendu : ${EXPECT_THEME})` : ''} |`,
     `| Langue des préférences | ${report.storage ? report.storage.language ?? '—' : '—'}${EXPECT_LANG ? ` (attendue : ${EXPECT_LANG})` : ''} |`,
@@ -473,6 +481,7 @@ async function main() {
   for (const m of report.console.slice(0, 30)) console.log(`console : ${m}`);
   for (const [k, v] of Object.entries(report.served)) console.log(`servi : ${k} ×${v}`);
   if (report.ehp) for (const m of report.ehp.exchanges) console.log(`ehp : ${m}`);
+  if (report.ehp) for (const st of report.ehp.storage) console.log(`ehp stockage : ${JSON.stringify(st)}`);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text + '\n');
   process.exit(report.ok ? 0 : 1);
 }

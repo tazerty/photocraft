@@ -29,6 +29,7 @@ const ALLOWED_404 = ['/fonts/manifest.txt'];
 // Paramètres passés au moteur (E3 : langue imposée ; E5 : espace de noms du stockage) et attentes.
 const QUERY = process.env.SMOKE_QUERY || 'webgl';
 const EXPECT_LANG = process.env.SMOKE_EXPECT_LANG || '';
+const EXPECT_THEME = process.env.SMOKE_EXPECT_THEME || '';
 const STORAGE_NS = process.env.SMOKE_STORAGE_NS || '';
 // E5 : purge de l'espace de noms par evora:purge (témoins : message d'un autre espace de noms,
 // message venu du moteur lui-même ; puis le vrai message de la page parente).
@@ -167,9 +168,14 @@ const STORAGE = `(async () => {
   const keys = Object.keys(localStorage);
   const prefsKey = keys.find((k) => k.endsWith('photocraft.preferences')) || null;
   let language = null;
-  try { language = prefsKey ? (JSON.parse(localStorage.getItem(prefsKey)).interface || {}).language ?? null : null; } catch { language = 'illisible'; }
+  let theme = null;
+  try {
+    const iface = prefsKey ? JSON.parse(localStorage.getItem(prefsKey)).interface || {} : {};
+    language = iface.language ?? null;
+    theme = iface.theme ?? null;
+  } catch { language = 'illisible'; }
   const dbs = indexedDB.databases ? (await indexedDB.databases()).map((d) => d.name) : null;
-  return JSON.stringify({ keys, prefsKey, language, dbs });
+  return JSON.stringify({ keys, prefsKey, language, theme, dbs });
 })()`;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -331,6 +337,7 @@ async function main() {
   const stray404 = state.notFound.filter((p) => !ALLOWED_404.includes(p));
   if (stray404.length) problems.push(`404 inattendus : ${stray404.join(', ')}`);
   const st = report.storage || { keys: [], dbs: [] };
+  if (EXPECT_THEME && st.theme !== EXPECT_THEME) problems.push(`thème imposé non appliqué : préférence ${st.theme}, attendu ${EXPECT_THEME}`);
   if (EXPECT_LANG && st.language !== EXPECT_LANG) problems.push(`langue imposée non appliquée : préférence ${st.language}, attendu ${EXPECT_LANG}`);
   if (STORAGE_NS) {
     const outside = st.keys.filter((k) => !k.startsWith(`${STORAGE_NS}:`));
@@ -366,6 +373,7 @@ async function main() {
     `| Paramètres du moteur | \`?${QUERY}\` |`,
     `| Stockage (localStorage / IndexedDB) | ${report.storage ? `${report.storage.keys.join(', ') || 'aucune clé'} / ${(report.storage.dbs || []).join(', ') || 'aucune base'}` : '—'} |`,
     `| Purge evora:purge (témoin / après) | ${report.purge ? `${report.purge.witness.keys.length} clé(s), ${(report.purge.witness.dbs || []).length} base(s) / ${report.purge.after.keys.length} clé(s), ${(report.purge.after.dbs || []).length} base(s)` : '—'} |`,
+    `| Thème des préférences | ${report.storage ? report.storage.theme ?? '—' : '—'}${EXPECT_THEME ? ` (attendu : ${EXPECT_THEME})` : ''} |`,
     `| Langue des préférences | ${report.storage ? report.storage.language ?? '—' : '—'}${EXPECT_LANG ? ` (attendue : ${EXPECT_LANG})` : ''} |`,
     `| Erreurs de page | ${report.errors.length} |`,
     `| Exceptions admises (404 fonts/manifest.txt) | ${report.allowed.length} |`,

@@ -1458,7 +1458,9 @@
 	Adwaita	Adwaita
 	Adwaita dark	Adwaita темна
 	Studio Theme	Тема «Студія»
+	Evora Theme	Тема Evora
 	Studio Light Theme	Світла тема «Студія»
+	Evora Light Theme	Світла тема Evora
 	Pro Theme	Тема «Профі»
 	Pro Medium Gray Theme	Середньосіра тема «Профі»
 	Pro Light Gray Theme	Світло-сіра тема «Профі»
@@ -2916,7 +2918,9 @@ fontWeight	Italic	Курсивний
 	Square, 12 x 12	Квадратна, 12 x 12
 	Square, 5 x 5	Квадратна, 5 x 5
 	Studio (Dark)	Студія (темна)
+	Evora (Dark)	Evora (темна)
 	Studio (Light)	Студія (світла)
+	Evora (Light)	Evora (світла)
 	Tabloid	Tabloid
 	Web Large	Веб: великий
 	Web Minimum	Веб: мінімальний

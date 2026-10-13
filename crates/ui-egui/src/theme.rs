@@ -52,10 +52,14 @@ pub enum ThemeKind {
     SoftDark,
     /// A low-contrast light theme: pale violet-grey surfaces, softened dark text and a periwinkle accent.
     SoftLight,
+    /// Evora build (patch E2): Evora's dark identity on the Studio layout, indigo accent #4F46E5.
+    Evora,
+    /// Evora build (patch E2): Evora's light identity on the Studio layout, indigo accent #4F46E5.
+    EvoraLight,
 }
 
 impl ThemeKind {
-    pub const ALL: [ThemeKind; 14] = [
+    pub const ALL: [ThemeKind; 16] = [
         ThemeKind::Pro,
         ThemeKind::ProMedium,
         ThemeKind::ProLightGray,
@@ -70,6 +74,8 @@ impl ThemeKind {
         ThemeKind::BreezeDark,
         ThemeKind::SoftDark,
         ThemeKind::SoftLight,
+        ThemeKind::Evora,
+        ThemeKind::EvoraLight,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -87,6 +93,8 @@ impl ThemeKind {
             ThemeKind::BreezeDark => "Breeze Dark",
             ThemeKind::SoftDark => "Soft Dark",
             ThemeKind::SoftLight => "Soft Light",
+            ThemeKind::Evora => "Evora (Dark)",
+            ThemeKind::EvoraLight => "Evora (Light)",
         }
     }
     /// The canonical name: `ui.set {theme}` accepts it and the Window › Theme commands are
@@ -107,6 +115,8 @@ impl ThemeKind {
             ThemeKind::BreezeDark => "breezeDark",
             ThemeKind::SoftDark => "softDark",
             ThemeKind::SoftLight => "softLight",
+            ThemeKind::Evora => "evora",
+            ThemeKind::EvoraLight => "evoraLight",
         }
     }
     /// Photoshop-grammar layout (tab strips, flat panels): the four Pro brightness levels.
@@ -124,6 +134,7 @@ impl ThemeKind {
                 | ThemeKind::AdwaitaDark
                 | ThemeKind::BreezeDark
                 | ThemeKind::SoftDark
+                | ThemeKind::Evora
         )
     }
     /// Whether this theme belongs to the light appearance family.
@@ -150,6 +161,8 @@ impl ThemeKind {
             "breezedark" | "kdedark" | "plasmadark" => Some(ThemeKind::BreezeDark),
             "softdark" => Some(ThemeKind::SoftDark),
             "softlight" => Some(ThemeKind::SoftLight),
+            "evora" | "evoradark" => Some(ThemeKind::Evora),
+            "evoralight" => Some(ThemeKind::EvoraLight),
             _ => None,
         }
     }
@@ -541,6 +554,91 @@ impl Tokens {
             // surfaces, so the secondary and faint text, the accent and danger text and the status
             // hues are darker to hold 4.5:1 (checked by the tests), and the primary button is a
             // deeper blue that takes white text.
+            // Evora build (patch E2): Evora's identity on the Studio layout (rounded chips, cards), not
+            // a copy of any desktop theme: neutral zinc surfaces and the Evora indigo #4F46E5 as
+            // accent and primary button, which takes white text (6.3:1). Text colours hold 4.5:1 on
+            // the surfaces and the hover, pressed and selected states; the accent text is a lighter
+            // indigo on dark surfaces and a deeper one on light surfaces. The UI font stays Inter.
+            ThemeKind::Evora => Tokens {
+                kind,
+                chrome: Color32::from_rgb(27, 27, 31),
+                canvas: Color32::from_rgb(12, 12, 14),
+                canvas_dot: Color32::from_rgb(12, 12, 14),
+                dock: Color32::from_rgb(20, 20, 23),
+                card: Color32::from_rgb(24, 24, 27),
+                card_border: Color32::from_rgb(39, 39, 42),
+                field: Color32::from_rgb(33, 33, 37),
+                field_border: Color32::from_rgb(63, 63, 70),
+                hover: Color32::from_rgb(45, 45, 50),
+                pressed: Color32::from_rgb(55, 55, 61),
+                text: Color32::from_rgb(250, 250, 250),
+                text_dim: Color32::from_rgb(212, 212, 216),
+                text_faint: Color32::from_rgb(170, 170, 178),
+                icon: Color32::from_rgb(228, 228, 231),
+                accent: Color32::from_rgb(79, 70, 229),
+                accent_soft: Color32::from_rgba_unmultiplied(79, 70, 229, 64),
+                accent_border: Color32::from_rgba_unmultiplied(99, 102, 241, 190),
+                accent_text: Color32::from_rgb(165, 180, 252),
+                separator: Color32::from_rgb(39, 39, 42),
+                shadow: Color32::from_black_alpha(150),
+                primary_bg: Color32::from_rgb(79, 70, 229),
+                primary_text: Color32::WHITE,
+                danger: Color32::from_rgb(248, 113, 113),
+                warning: Color32::from_rgb(251, 191, 36),
+                radius_sm: 6.0,
+                radius: 6.0,
+                radius_lg: 8.0,
+                bevel: false,
+                pro: false,
+                round_chips: true,
+                tab_strip: Color32::TRANSPARENT,
+                row_selected: Color32::TRANSPARENT,
+                histogram_bg: Color32::from_rgb(12, 12, 14),
+                histogram_level: 225,
+                caption_close: Color32::from_rgb(220, 38, 38),
+                caption_close_text: Color32::WHITE,
+                scrim: Color32::from_black_alpha(110),
+            },
+            ThemeKind::EvoraLight => Tokens {
+                kind,
+                chrome: Color32::from_rgb(244, 244, 245),
+                canvas: Color32::from_rgb(228, 228, 231),
+                canvas_dot: Color32::from_rgb(212, 212, 216),
+                dock: Color32::from_rgb(238, 238, 240),
+                card: Color32::from_rgb(250, 250, 250),
+                card_border: Color32::from_rgb(228, 228, 231),
+                field: Color32::WHITE,
+                field_border: Color32::from_rgb(212, 212, 216),
+                hover: Color32::from_rgb(239, 239, 241),
+                pressed: Color32::from_rgb(228, 228, 231),
+                text: Color32::from_rgb(24, 24, 27),
+                text_dim: Color32::from_rgb(63, 63, 70),
+                text_faint: Color32::from_rgb(82, 82, 91),
+                icon: Color32::from_rgb(63, 63, 70),
+                accent: Color32::from_rgb(79, 70, 229),
+                accent_soft: Color32::from_rgba_unmultiplied(79, 70, 229, 40),
+                accent_border: Color32::from_rgba_unmultiplied(79, 70, 229, 170),
+                accent_text: Color32::from_rgb(67, 56, 202),
+                separator: Color32::from_rgb(228, 228, 231),
+                shadow: Color32::from_black_alpha(45),
+                primary_bg: Color32::from_rgb(79, 70, 229),
+                primary_text: Color32::WHITE,
+                danger: Color32::from_rgb(185, 28, 28),
+                warning: Color32::from_rgb(161, 98, 7),
+                radius_sm: 6.0,
+                radius: 6.0,
+                radius_lg: 8.0,
+                bevel: false,
+                pro: false,
+                round_chips: true,
+                tab_strip: Color32::TRANSPARENT,
+                row_selected: Color32::TRANSPARENT,
+                histogram_bg: Color32::from_rgb(24, 24, 27),
+                histogram_level: 240,
+                caption_close: Color32::from_rgb(220, 38, 38),
+                caption_close_text: Color32::WHITE,
+                scrim: Color32::from_black_alpha(110),
+            },
             ThemeKind::BreezeLight => Tokens {
                 kind,
                 chrome: Color32::from_rgb(219, 222, 226),

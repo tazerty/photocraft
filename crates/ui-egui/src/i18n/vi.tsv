@@ -707,7 +707,9 @@
 	Reset Workspace	Đặt lại không gian làm việc
 	Shapes	Hình
 	Studio Light Theme	Chủ đề Studio sáng
+	Evora Light Theme	Chủ đề Evora sáng
 	Studio Theme	Chủ đề Studio
+	Evora Theme	Chủ đề Evora
 	Styles	Kiểu
 	Swatches	Mẫu màu
 	System Info…	Thông tin hệ thống…
@@ -2654,7 +2656,9 @@ shape	Appearance	Diện mạo
 	Square, 12 x 12	Vuông, 12 x 12
 	Square, 5 x 5	Vuông, 5 x 5
 	Studio (Dark)	Studio (Tối)
+	Evora (Dark)	Evora (Tối)
 	Studio (Light)	Studio (Sáng)
+	Evora (Light)	Evora (Sáng)
 	Tabloid	Khổ báo
 	Text Replacement	Thay thế văn bản
 	Thin	Mỏng

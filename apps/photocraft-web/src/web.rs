@@ -59,6 +59,9 @@ pub fn start() {
         let q = query();
         // Evora build (patch E3): the UI language the host imposes (`?lang=`).
         let forced_language = host_language(query_param(&q, "lang").as_deref());
+        // Evora build (patch E2): the Evora theme, light or dark as the host asks (`?theme=`),
+        // instead of upstream's Pro theme imposed at every start.
+        let theme = host_theme(query_param(&q, "theme").as_deref());
         // Evora build (patch E5): the storage namespace, before any storage is read, and the
         // host's `evora:purge` (accepted from `?parentOrigin=` only).
         crate::storage_ns::init(query_param(&q, "storageNs").as_deref());
@@ -90,7 +93,7 @@ pub fn start() {
                 canvas,
                 options,
                 Box::new(move |cc| {
-                    PhotocraftApp::setup_context(&cc.egui_ctx, ThemeKind::Pro);
+                    PhotocraftApp::setup_context(&cc.egui_ctx, theme);
                     let inbox: Inbox = Arc::default();
                     let place_inbox: Inbox = Arc::default();
                     let served: Served = Arc::default();
@@ -103,7 +106,7 @@ pub fn start() {
                         photocraft_ui_egui::notices::post(&mut app, i18n::t("Some brush presets could not be loaded"), preset_warnings, true, None);
                     }
                     listen_pen(&pen_target, app.stylus.feed.clone());
-                    app.set_theme(&cc.egui_ctx, ThemeKind::Pro);
+                    app.set_theme(&cc.egui_ctx, theme);
                     if let Some(code) = forced_language
                         && let Err(e) = app.run("prefs.set", serde_json::json!({"values": {"interface.language": code}}))
                     {
@@ -224,6 +227,14 @@ fn query_param(query: &str, key: &str) -> Option<String> {
         }
         js_sys::decode_uri_component(&v.replace('+', " ")).ok().map(String::from)
     })
+}
+
+/// Evora build (patch E2): Evora's light theme for `?theme=light`, its dark theme otherwise.
+fn host_theme(value: Option<&str>) -> ThemeKind {
+    match value.map(str::trim) {
+        Some(v) if v.eq_ignore_ascii_case("light") => ThemeKind::EvoraLight,
+        _ => ThemeKind::Evora,
+    }
 }
 
 /// Evora build (patch E3): the engine language for the host's language tag (BCP 47, as Evora

@@ -805,7 +805,9 @@
 	Stroke Path…	Útvonal körvonalazása…
 	Strong	Erős
 	Studio Light Theme	Studio világos téma
+	Evora Light Theme	Evora világos téma
 	Studio Theme	Studio téma
+	Evora Theme	Evora téma
 	Styles	Stílusok
 	Stylistic Alternates	Stilisztikai változatok
 	Stylize	Stilizálás
@@ -3598,7 +3600,9 @@ cameraRaw	Yellow	Sárga
 	Stroke:	Körvonal:
 	Studio	Studio
 	Studio (Dark)	Studio (sötét)
+	Evora (Dark)	Evora (sötét)
 	Studio (Light)	Studio (világos)
+	Evora (Light)	Evora (világos)
 	Stylization	Stilizálás
 	Switch Foreground and Background Colors	Előtér- és háttérszín cseréje
 	Switched to CPU rendering	Átváltás CPU-s megjelenítésre

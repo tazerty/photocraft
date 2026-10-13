@@ -320,8 +320,12 @@ jobs:
           CHROME_BIN: google-chrome
           SMOKE_TIMEOUT_MS: "180000"
           # E3 : langue imposée par la coquille (?lang=), vérifiée dans les préférences du moteur.
-          SMOKE_QUERY: "webgl&lang=fr"
+          # E5 : espace de noms du stockage (?storageNs=) et purge par evora:purge, acceptée de la
+          # seule page parente déclarée (?parentOrigin=, remplacée par l'origine B du test).
+          SMOKE_QUERY: "webgl&lang=fr&storageNs=evoraSmokeNs0123&parentOrigin={{PARENT_ORIGIN}}"
           SMOKE_EXPECT_LANG: fr
+          SMOKE_STORAGE_NS: evoraSmokeNs0123
+          SMOKE_PURGE: "1"
         run: node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke.json"
 
       - name: Bilan des portes

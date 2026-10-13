@@ -1,13 +1,14 @@
-//! The PhotoCraft brand mark at the left of the title bar: the app icon (the kitsune,
-//! `assets/app-icon/`, see its README), where Photoshop shows its "Ps" tile. The PNG carries the
-//! icon's rounded corners; it is decoded once per context into a mipmapped texture, so it stays
-//! crisp at the title bar's size on any display scale.
+//! The brand mark at the left of the title bar, where Photoshop shows its "Ps" tile. Evora build
+//! (patch E1): the upstream app icon is replaced by Lumbra's neutral mark (`assets/evora/`, an
+//! indigo tile with a half-lit disc). The PNG carries the icon's rounded corners; it is decoded
+//! once per context into a mipmapped texture, so it stays crisp at the title bar's size on any
+//! display scale.
 
 use egui::{Color32, Context, Id, Rect, TextureHandle, TextureOptions, Ui, pos2};
 use photocraft_codecs::{ChannelLayout, SampleType};
 
 /// 128 px: sharp at 20 pt on a 3× display, and the mipmaps keep it clean at 1×.
-const ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png");
+const ICON_PNG: &[u8] = include_bytes!("../../../assets/evora/lumbra-mark-128.png");
 
 /// The icon's pixels (one transparent pixel if it couldn't be decoded, which a test rules out).
 fn decode() -> egui::ColorImage {

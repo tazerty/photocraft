@@ -12,7 +12,7 @@
 # Clean-room: every entry was written from the plain meaning of the English label using ordinary
 # Hungarian image-editing vocabulary (réteg, maszk, kijelölés ...). No proprietary localisation
 # resource, string table or product UI was consulted or copied; add entries the same way.
-# Product and technology names (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...) stay in Latin
+# Product and technology names (PhotoCraft, OpenType, CMYK, Lab ...) stay in Latin
 # letters; the trailing "…" of dialog commands is kept. Plural rule: a count is followed by the
 # singular noun in Hungarian, so every @plural entry has a single form.
 
@@ -430,7 +430,7 @@
 	32-bit Preview Options…	32 bites előnézet beállításai…
 	4-up	4 nézet
 	6-up	6 nézet
-	About PhotoCraft	A PhotoCraft névjegye
+	About Lumbra	A Lumbra névjegye
 	About {app}	Névjegy: {app}
 	Actions	Műveletsorok
 	Activate Panel	Panel aktiválása
@@ -453,7 +453,6 @@
 	Artboard Guides	Rajztábla-segédvonalak
 	Artboards to Files	Rajztáblák fájlokba
 	Artboards to PDF	Rajztáblák PDF-be
-	ArtCraft Website	ArtCraft-weboldal
 	Average	Átlag
 	Background From Layer	Háttér a rétegből
 	Bitmap…	Bittérkép…
@@ -617,8 +616,6 @@
 	Internet Standard RGB	Internetes szabványos RGB
 	Inverse	Megfordítás
 	Iris Blur…	Íriszelmosás…
-	Join the ArtCraft Discord	Csatlakozás az ArtCraft Discordhoz
-	Join the ArtCraft Discord…	Csatlakozás az ArtCraft Discordhoz…
 	Language	Nyelv
 	Language Options	Nyelvi beállítások
 	Large	Nagy
@@ -711,9 +708,7 @@
 	Paths	Útvonalak
 	Paths to Illustrator	Útvonalak Illustrator-fájlba
 	Pattern Preview	Mintázat előnézete
-	PhotoCraft	PhotoCraft
-	PhotoCraft on GitHub	PhotoCraft a GitHubon
-	PhotoCraft Website	PhotoCraft-weboldal
+	Lumbra	Lumbra
 	Photography	Fotózás
 	Picture Frame…	Képkeret…
 	Pinch…	Becsípés…
@@ -754,7 +749,6 @@
 	Render	Renderelés
 	Replace All Missing Fonts	Összes hiányzó betűtípus cseréje
 	Report an Issue	Hiba bejelentése
-	Report an Issue…	Hiba bejelentése…
 	Reset All	Összes alaphelyzetbe
 	Reset All Tools	Összes eszköz alaphelyzetbe
 	Reset Tool	Eszköz alaphelyzetbe
@@ -1782,7 +1776,6 @@ layerLabel	Magenta	Bíbor
 	Delete Tool Preset	Eszköz-előbeállítás törlése
 	Delete tool preset	Eszköz-előbeállítás törlése
 	Delete Workspace	Munkaterület törlése
-	Discord	Discord
 	Doc: {w} × {h} px	Dok.: {w} × {h} px
 	Drag a box or click four corners · drag the corners onto the edges of a skewed shape · {commit} commits · Esc cancels	Húzz egy keretet, vagy kattints a négy sarokra · húzd a sarkokat a ferde alakzat éleire · {commit}: véglegesítés · Esc: megszakítás
 	Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · arrows nudge · X swaps orientation · {commit} commits · Esc cancels	Húzz egy körbevágási keretet · belül húzva mozgatod · az élekkel átméretezed ({ratio}: arány, {centre}: középről) · Space: mozgatás rajzolás közben · nyilak: léptetés · X: tájolás cseréje · {commit}: véglegesítés · Esc: megszakítás
@@ -1837,7 +1830,6 @@ layerLabel	Magenta	Bíbor
 	Intersect with	Metszet ezzel
 	Intersect with selection  ({key})	Metszet a kijelöléssel  ({key})
 	Invalid panel layout; restored the default dock	Érvénytelen panelelrendezés; az alapértelmezett dokkolás visszaállítva
-	Join the ArtCraft Discord ({url})	Csatlakozz az ArtCraft Discord-szerveréhez ({url})
 	Keyboard Shortcuts	Billentyűparancsok
 	Kind	Fajta
 	Lasso	Lasszó
@@ -2647,7 +2639,7 @@ cameraRaw	Yellow	Sárga
 	Advanced	Speciális
 	Adwaita dark	Adwaita sötét
 	All	Mind
-	All shortcuts reset to PhotoCraft defaults.	Minden billentyűparancs visszaállt a PhotoCraft alapértékére.
+	All shortcuts reset to Lumbra defaults.	Minden billentyűparancs visszaállt a Lumbra alapértékére.
 	All Slices	Összes szelet
 	All User Slices	Összes felhasználói szelet
 	Always create smart objects when placing	Elhelyezéskor mindig intelligens objektum létrehozása
@@ -2739,7 +2731,7 @@ cameraRaw	Yellow	Sárga
 	Data	Adatok
 	Date	Dátum
 	Day For Night	Nappali éjszaka
-	Default PhotoCraft Size	Alapértelmezett PhotoCraft-méret
+	Default Lumbra Size	Alapértelmezett Lumbra-méret
 	Default printer	Alapértelmezett nyomtató
 	Default restored.	Alapértelmezés visszaállítva.
 	Defaults	Alapértékek
@@ -2887,10 +2879,11 @@ cameraRaw	Yellow	Sárga
 	Permission denied	Hozzáférés megtagadva
 	Phone	Telefon
 	Photo	Fotó
-	PhotoCraft found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from PhotoCraft's. Import it?	A PhotoCraft egy másik képszerkesztő billentyűparancs-készletét találta ezen a számítógépen: {set}. Ebben {n} billentyűparancs eltér a PhotoCraftétól. Importálod?
-	PhotoCraft keeps retrying; until a save succeeds, preference changes are lost when it closes.	A PhotoCraft tovább próbálkozik; amíg a mentés nem sikerül, a beállítások módosításai bezáráskor elvesznek.
-	PhotoCraft Manages Colors	A PhotoCraft kezeli a színeket
-	PhotoCraft — an open-source, native image editor written in Rust.	PhotoCraft – nyílt forráskódú, natív képszerkesztő Rust nyelven.
+	Lumbra found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from Lumbra's. Import it?	A Lumbra egy másik képszerkesztő billentyűparancs-készletét találta ezen a számítógépen: {set}. Ebben {n} billentyűparancs eltér a Lumbráétól. Importálod?
+	Lumbra keeps retrying; until a save succeeds, preference changes are lost when it closes.	A Lumbra tovább próbálkozik; amíg a mentés nem sikerül, a beállítások módosításai bezáráskor elvesznek.
+	Lumbra Manages Colors	A Lumbra kezeli a színeket
+	Lumbra — an open-source, native image editor written in Rust.	Lumbra – nyílt forráskódú, natív képszerkesztő Rust nyelven.
+	Based on PhotoCraft, open-source software (MIT OR Apache-2.0).	A PhotoCraft nyílt forráskódú szoftveren alapul (MIT OR Apache-2.0).
 	Picas	Pica
 	Pixels	Pixel
 	Pixels/Centimeter	Pixel/centiméter
@@ -3006,7 +2999,7 @@ cameraRaw	Yellow	Sárga
 	The document does not have an embedded colour profile. Working space: {working}.	A dokumentumnak nincs beágyazott színprofilja. Munkaszíntér: {working}.
 	The document has an embedded colour profile that does not match the working space.\nEmbedded: {embedded}\nWorking: {working}	A dokumentum beágyazott színprofilja eltér a munkaszíntértől.\nBeágyazott: {embedded}\nMunkaszíntér: {working}
 	The keyboard shortcut set was not imported: {error}	A billentyűparancs-készlet importálása nem sikerült: {error}
-	These settings aren't available in PhotoCraft yet.	Ezek a beállítások a PhotoCraftban még nem érhetők el.
+	These settings aren't available in Lumbra yet.	Ezek a beállítások a Lumbrában még nem érhetők el.
 	This fill layer must be rasterized before proceeding. Its fill content will no longer be editable. Rasterize the layer?	A folytatáshoz a kitöltőréteget raszterizálni kell. A kitöltés tartalma ezután nem lesz szerkeszthető. Raszterizálod a réteget?
 	This layer must be rasterized before proceeding.	A folytatáshoz a réteget raszterizálni kell.
 	This shape layer must be rasterized before proceeding. It will no longer be editable as a shape. Rasterize the shape?	A folytatáshoz az alakzatréteget raszterizálni kell. Ezután alakzatként nem lesz szerkeszthető. Raszterizálod az alakzatot?
@@ -3041,7 +3034,7 @@ cameraRaw	Yellow	Sárga
 	Y	Y
 	Yes	Igen
 	Your keyboard shortcut set {set} is in use here: {n} shortcuts differ from the defaults. Edit › Keyboard Shortcuts shows them; Reset All to Defaults undoes this.	A billentyűparancs-készleted itt is használatban van: {set}. Ebből {n} billentyűparancs eltér az alapértelmezettől. A Szerkesztés › Billentyűparancsok alatt láthatod őket; az Összes visszaállítása alapértékre paranccsal ez visszavonható.
-	{n} commands are not in PhotoCraft.	{n} parancs nem érhető el a PhotoCraftban.
+	{n} commands are not in Lumbra.	{n} parancs nem érhető el a Lumbrában.
 	{shortcut} assigned.	Billentyűparancs hozzárendelve: {shortcut}
 	{shortcut} is already in use by {commands} and will be removed from it when you click OK.	A billentyűparancs már foglalt: {shortcut}. Jelenlegi parancs: {commands}. Az OK gombra kattintva onnan törlődik.
 
@@ -3073,7 +3066,6 @@ cameraRaw	Yellow	Sárga
 	Arch	Boltív
 	Area	Terület
 	Artboard Tool	Rajztábla
-	ArtCraft	ArtCraft
 	Ask	Rákérdezés
 	Aspect Ratio	Oldalarány
 	Assign Profile	Profil hozzárendelése
@@ -3332,7 +3324,6 @@ cameraRaw	Yellow	Sárga
 	Interpret Footage	Videoanyag értelmezése
 	Interval	Intervallum
 	Invalid {mode} profile	Érvénytelen profil ({mode})
-	Join us on Discord	Csatlakozz hozzánk a Discordon
 	Keep Using CPU	Marad a CPU
 	Kernel	Szűrőmag
 	Keyboard	Billentyűzet
@@ -3432,7 +3423,7 @@ cameraRaw	Yellow	Sárga
 	Opened {name}	Megnyitva: {name}
 	Opened {url}	Megnyitva: {url}
 	Opening…	Megnyitás…
-	Or set Preferences › Performance › Linux display server to X11: PhotoCraft then always starts under XWayland.	Vagy állítsd X11-re a Beállítások › Teljesítmény › Linuxos megjelenítőszerver értékét: a PhotoCraft ekkor mindig XWayland alatt indul.
+	Or set Preferences › Performance › Linux display server to X11: Lumbra then always starts under XWayland.	Vagy állítsd X11-re a Beállítások › Teljesítmény › Linuxos megjelenítőszerver értékét: a Lumbra ekkor mindig XWayland alatt indul.
 	Original Ratio	Eredeti arány
 	Other	Egyéb
 	Out	Végpont
@@ -3451,9 +3442,8 @@ cameraRaw	Yellow	Sárga
 	Performance	Teljesítmény
 	Perimeter	Kerület
 	Perspective Crop Tool	Perspektivikus körbevágás
-	PhotoCraft is using the CPU image compositor. The window may still use your graphics adapter.	A PhotoCraft a CPU-s képösszeállítót használja. Az ablak megjelenítése ettől még használhatja a grafikus adaptert.
-	PhotoCraft website	PhotoCraft-weboldal
-	PhotoCraft — Screen Color Picker	PhotoCraft — Képernyő-színválasztó
+	Lumbra is using the CPU image compositor. The window may still use your graphics adapter.	A Lumbra a CPU-s képösszeállítót használja. Az ablak megjelenítése ettől még használhatja a grafikus adaptert.
+	Lumbra — Screen Color Picker	Lumbra — Képernyő-színválasztó
 	Photomerge	Fotóegyesítés
 	Pick a screen pixel or press Esc to cancel	Válassz egy pixelt a képernyőn, vagy nyomd meg az Esc billentyűt a megszakításhoz
 	Pick screen color	Szín kiválasztása a képernyőről
@@ -3534,7 +3524,7 @@ cameraRaw	Yellow	Sárga
 	Sample a pixel anywhere on the screen	Mintavétel a képernyő bármely pixeléből
 	Sampler	Színmintavevő
 	Save in background	Mentés a háttérben
-	Save your work and restart PhotoCraft to retry GPU acceleration. CPU rendering remains active for this session.	A GPU-gyorsítás újrapróbálásához mentsd a munkádat, majd indítsd újra a PhotoCraftot. Ebben a munkamenetben a CPU-s megjelenítés marad aktív.
+	Save your work and restart Lumbra to retry GPU acceleration. CPU rendering remains active for this session.	A GPU-gyorsítás újrapróbálásához mentsd a munkádat, majd indítsd újra a Lumbrát. Ebben a munkamenetben a CPU-s megjelenítés marad aktív.
 	Saved a copy as {path}	Másolat mentve: {path}
 	Saved {name}	Mentve: {name}
 	Saved {path}; image assets: {n} in {dir}	Mentve: {path}; képelemek: {n} ({dir})
@@ -3624,7 +3614,7 @@ cameraRaw	Yellow	Sárga
 	This session: {reason}	Ebben a munkamenetben: {reason}
 	Tiny	Apró
 	To Center	Középre
-	To drop files, start PhotoCraft under XWayland: `{command}`	Fájlok behúzásához indítsd a PhotoCraftot XWayland alatt: `{command}`
+	To drop files, start Lumbra under XWayland: `{command}`	Fájlok behúzásához indítsd a Lumbrát XWayland alatt: `{command}`
 	Tool	Eszköz
 	Top Left	Bal felső
 	Top Right	Jobb felső
@@ -3886,7 +3876,7 @@ cameraRaw	Yellow	Sárga
 	Modify Date	Módosítás dátuma
 	Mouse Controls	Egérvezérlés
 	Mouse Coordinates	Egérkoordináták
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	A fájlok natív behúzása Waylanden még nem támogatott. Használd a Fájl › Megnyitás parancsot, vagy futtasd a PhotoCraftot XWaylanden: `WAYLAND_DISPLAY= photocraft`.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run Lumbra under XWayland with `WAYLAND_DISPLAY= photocraft`.	A fájlok natív behúzása Waylanden még nem támogatott. Használd a Fájl › Megnyitás parancsot, vagy futtasd a Lumbrát XWaylanden: `WAYLAND_DISPLAY= photocraft`.
 	New channel only	Csak új csatorna
 	New document…     ⌘N	Új dokumentum…     ⌘N
 	New Layer from Brush	Új réteg ecsetből
@@ -3932,7 +3922,7 @@ cameraRaw	Yellow	Sárga
 	Profile Mismatches: Ask When Opening	Profileltérés: rákérdezés megnyitáskor
 	Province / State	Megye / állam
 	Quick Sync	Gyors szinkronizálás
-	Quit PhotoCraft	Kilépés a PhotoCraftból
+	Quit Lumbra	Kilépés a Lumbrából
 	Recent Items	Legutóbbi elemek
 	Reference point location	Viszonyítási pont helye
 	Rendering…	Renderelés…

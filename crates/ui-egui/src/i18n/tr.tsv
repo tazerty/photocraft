@@ -4,7 +4,7 @@
 # Clean-room: every entry was written from the plain meaning of the English label using ordinary
 # Turkish computing vocabulary (katman, seçim, maske, ayar katmanı, fırça, degrade ...). No
 # proprietary localisation resource, string table or product UI was consulted or copied; add
-# entries the same way. Product and technology names (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...)
+# entries the same way. Product and technology names (PhotoCraft, OpenType, CMYK, Lab ...)
 # stay as they are; the trailing "…" of dialog commands is kept.
 #
 # Custom paper dimensions in Print Settings.
@@ -761,12 +761,7 @@
 	Timeline	Zaman Çizelgesi
 	Tool Presets	Araç Ön Ayarları
 	Tools	Araçlar
-	About PhotoCraft	PhotoCraft Hakkında
-	PhotoCraft Website	PhotoCraft Web Sitesi
-	PhotoCraft on GitHub	GitHub'da PhotoCraft
-	ArtCraft Website	ArtCraft Web Sitesi
-	Join the ArtCraft Discord…	ArtCraft Discord'una Katıl…
-	Report an Issue…	Sorun Bildir…
+	About Lumbra	Lumbra Hakkında
 	WIA Support…	WIA Desteği…
 	Apply	Uygula
 	HSB/HSL	HSB/HSL
@@ -817,7 +812,7 @@
 	All Caps	Tamamı Büyük Harf
 	All Slices	Tüm Dilimler
 	All User Slices	Tüm Kullanıcı Dilimleri
-	All shortcuts reset to PhotoCraft defaults.	Tüm kısayollar PhotoCraft varsayılanlarına sıfırlanır.
+	All shortcuts reset to Lumbra defaults.	Tüm kısayollar Lumbra varsayılanlarına sıfırlanır.
 	Alt	Alt
 	Always use pressure for opacity	Opaklık için her zaman basıncı kullan
 	Always use pressure for size	Boyut için her zaman basıncı kullan
@@ -1042,7 +1037,6 @@
 	Diffusion	Difüzyon
 	Discard the embedded profile (don't color manage)	Gömülü profili atın (renk yönetimi yapmayın)
 	Discontiguous	Bitişik Değil
-	Discord	Discord
 	Dismiss	Kapat
 	Display P3	Display P3
 	Display Text	Metni Görüntüle
@@ -1063,8 +1057,8 @@
 	Drop an image or PSD anywhere to open it.	Açmak için bir görüntüyü veya PSD'yi herhangi bir yere bırakın.
 	Native file drag-and-drop is unavailable	Yerel dosya sürükle ve bırak özelliği kullanılamıyor
 	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Yerel dosya sürükle ve bırak özelliği henüz Wayland'de desteklenmiyor. Dosya › Aç'ı kullanın veya görüntüyü dosya yöneticinizde kopyalayıp {paste} ile yapıştırın.
-	To drop files, start PhotoCraft under XWayland: `{command}`	Dosyaları bırakmak için XWayland altında PhotoCraft'ı başlatın: `{command}`
-	Or set Preferences › Performance › Linux display server to X11: PhotoCraft then always starts under XWayland.	Veya Tercihler › Performans › Linux görüntüleme sunucusunu X11 olarak ayarlayın: PhotoCraft bundan sonra her zaman XWayland altında başlar.
+	To drop files, start Lumbra under XWayland: `{command}`	Dosyaları bırakmak için XWayland altında Lumbra'yı başlatın: `{command}`
+	Or set Preferences › Performance › Linux display server to X11: Lumbra then always starts under XWayland.	Veya Tercihler › Performans › Linux görüntüleme sunucusunu X11 olarak ayarlayın: Lumbra bundan sonra her zaman XWayland altında başlar.
 	Edit › Paste	Düzenle › Yapıştır
 	Duplicate Layers…	Katmanları Çoğalt…
 	Duplicate style	Stili çoğalt
@@ -1175,7 +1169,6 @@
 	Invert All	Tümünü Ters Çevir
 	Invert has no settings.	Tersine çevirmenin hiçbir ayarı yoktur.
 	Italic	İtalik
-	Join us on Discord	Discord'da bize katılın
 	Justify all	Tümünü iki yana yasla
 	Justify last centered	Son satır ortalı, iki yana yasla
 	Justify last left	Son satır sola yaslı, iki yana yasla
@@ -1311,9 +1304,10 @@
 	Perspective Warp is not active	Perspektif Çarpıtma etkin değil
 	Perspective Warp: draw planes along the image's perspective, then switch to Warp	Perspektif Çarpıtma: görüntünün perspektifi boyunca düzlemler çizin, ardından Çarpıtma'ya geçin
 	Photo Filter	Fotoğraf Filtresi
-	PhotoCraft	PhotoCraft
-	PhotoCraft Manages Colors	PhotoCraft Renkleri Yönetir
-	PhotoCraft — an open-source, native image editor written in Rust.	PhotoCraft — Rust'ta yazılmış açık kaynaklı, yerel bir görüntü düzenleyici.
+	Based on PhotoCraft, open-source software (MIT OR Apache-2.0).	Açık kaynaklı bir yazılım olan PhotoCraft'a dayanır (MIT OR Apache-2.0).
+	Lumbra	Lumbra
+	Lumbra Manages Colors	Lumbra Renkleri Yönetir
+	Lumbra — an open-source, native image editor written in Rust.	Lumbra — Rust'ta yazılmış açık kaynaklı, yerel bir görüntü düzenleyici.
 	Pin Depth:	Pim Derinliği:
 	Pixel Length:	Piksel Uzunluğu:
 	Pixels/Centimeter	Piksel/Santimetre
@@ -1388,11 +1382,11 @@
 	Import Shortcuts…	Kısayolları İçe Aktar…
 	Load a keyboard shortcut set saved as .kys	.kys olarak kaydedilen bir klavye kısayolu kümesi yükleyin
 	Imported {n} shortcuts from {file}. Click OK to keep them.	{n} kısayol {file} dosyasından içe aktarıldı. Saklamak için Tamam'a tıklayın.
-	{n} commands are not in PhotoCraft.	{n} komut PhotoCraft'ta yok.
+	{n} commands are not in Lumbra.	{n} komut Lumbra'da yok.
 	Keyboard shortcuts imported	Klavye kısayolları içe aktarıldı
 	Your keyboard shortcut set {set} is in use here: {n} shortcuts differ from the defaults. Edit › Keyboard Shortcuts shows them; Reset All to Defaults undoes this.	{set} klavye kısayol setiniz burada kullanılıyor: {n} kısayol varsayılanlardan farklı. Düzenle › Klavye Kısayolları bunları gösterir; Tümünü Varsayılanlara Sıfırla bu işlemi geri alır.
 	Import keyboard shortcuts?	Klavye kısayolları içe aktarılsın mı?
-	PhotoCraft found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from PhotoCraft's. Import it?	PhotoCraft, bu bilgisayardaki başka bir görüntü düzenleyicide {set} klavye kısayol setinizi buldu: {n} kısayol PhotoCraft'tan farklı. İçe aktarılsın mı?
+	Lumbra found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from Lumbra's. Import it?	Lumbra, bu bilgisayardaki başka bir görüntü düzenleyicide {set} klavye kısayol setinizi buldu: {n} kısayol Lumbra'dan farklı. İçe aktarılsın mı?
 	Edit › Keyboard Shortcuts › Reset All to Defaults undoes an import.	Düzenle › Klavye Kısayolları › Tümünü Varsayılanlara Sıfırla, içe aktarma işlemini geri alır.
 	Don't Import	İçe Aktarma
 	The keyboard shortcut set was not imported: {error}	Klavye kısayol seti içe aktarılmadı: {error}
@@ -1579,7 +1573,6 @@
 	Apple Watch 45mm	Apple Watch 45mm
 	Aqua	Turkuaz
 	Art & Illustration	Sanat ve İllüstrasyon
-	ArtCraft	ArtCraft
 	Background Eraser Tool	Arka Plan Silgisi Aracı
 	Bevel & Emboss	Eğim ve Kabartma
 	Blend Mode	Karıştırma Modu
@@ -1615,7 +1608,7 @@
 	Current Tool	Geçerli Araç
 	Custom Shape Tool	Özel Şekil Aracı
 	Cyans	Camgöbeği
-	Default PhotoCraft Size	Varsayılan PhotoCraft Boyutu
+	Default Lumbra Size	Varsayılan Lumbra Boyutu
 	Delete Workspace	Çalışma Alanını Sil
 	Diamond	Elmas
 	Dimensions:	Ölçüler:
@@ -1726,7 +1719,6 @@
 	Pen Tool	Kalem Aracı
 	Convert Point Tool	Nokta Dönüştürme Aracı
 	Photo	Fotoğraf
-	PhotoCraft website	PhotoCraft web sitesi
 	Picas	Pikalar
 	Pillow Emboss	Yastık Kabartma
 	Pixel Replacement	Piksel Değiştirme
@@ -2054,7 +2046,7 @@
 	System Info	Sistem Bilgisi
 	More panels	Daha fazla panel
 	More documents	Daha fazla belge
-	These settings aren't available in PhotoCraft yet.	Bu ayarlar henüz PhotoCraft'ta mevcut değildir.
+	These settings aren't available in Lumbra yet.	Bu ayarlar henüz Lumbra'da mevcut değildir.
 	Graphics	Grafik
 	Reset GPU Backend	GPU Arka Ucunu Sıfırla
 	Applies at next launch.	Bir sonraki açılışta geçerlidir.
@@ -2260,7 +2252,7 @@
 	Automatic uses GPU acceleration when available and falls back to CPU rendering on errors.	Otomatik, mümkün olduğunda GPU hızlandırmayı kullanır ve hatalarda CPU oluşturmaya geri döner.
 	Switched to CPU rendering	CPU oluşturmaya geçildi
 	GPU acceleration could not continue. Your documents are unchanged.	GPU hızlandırması devam edemedi. Belgeleriniz değişmedi.
-	PhotoCraft is using the CPU image compositor. The window may still use your graphics adapter.	PhotoCraft, CPU görüntü birleştiricisini kullanıyor. Pencere yine de grafik bağdaştırıcınızı kullanıyor olabilir.
+	Lumbra is using the CPU image compositor. The window may still use your graphics adapter.	Lumbra, CPU görüntü birleştiricisini kullanıyor. Pencere yine de grafik bağdaştırıcınızı kullanıyor olabilir.
 	Retry GPU requires a restart. Save your work first.	GPU'yu yeniden dene, yeniden başlatma gerektirir. Öncelikle çalışmanızı kaydedin.
 	Keep Using CPU	CPU'yu Kullanmaya Devam Et
 	Retry GPU tries the graphics processor again now.	GPU'yu yeniden dene, grafik işlemciyi hemen yeniden dener.
@@ -2648,7 +2640,7 @@ cameraRaw	Color	Renk
 	Restart Required	Yeniden Başlatma Gerekli
 	Restart	Yeniden başlat
 	Quit	Çıkış
-	Quit PhotoCraft	PhotoCraft'tan Çık
+	Quit Lumbra	Lumbra'dan Çık
 	Close Window	Pencereyi Kapat
 	New Window	Yeni Pencere
 	Open Image	Görüntüyü Aç
@@ -3036,7 +3028,6 @@ cameraRaw	Color	Renk
 	Custom Pixel Aspect Ratio	Özel Piksel En Boy Oranı
 	32-bit Preview Options	32 bit Önizleme Seçenekleri
 	New Guide	Yeni Kılavuz
-	Join the ArtCraft Discord	ArtCraft Discord'una Katıl
 	Report an Issue	Sorun Bildir
 	Load Files into Stack	Dosyaları Yığına Yükle
 	Statistics	İstatistikler
@@ -3425,7 +3416,7 @@ cameraRaw	Color	Renk
 	Modify Date	Değiştirilme Tarihi
 	Mosaic	Mozaik
 	Motion Blur	Hareket Bulanıklığı
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Yerel dosya sürükle ve bırak özelliği henüz Wayland'de desteklenmiyor. Dosya › Aç'ı kullanın veya PhotoCraft'ı XWayland altında `WAYLAND_DISPLAY= photocraft` ile çalıştırın.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run Lumbra under XWayland with `WAYLAND_DISPLAY= photocraft`.	Yerel dosya sürükle ve bırak özelliği henüz Wayland'de desteklenmiyor. Dosya › Aç'ı kullanın veya Lumbra'yı XWayland altında `WAYLAND_DISPLAY= photocraft` ile çalıştırın.
 	Neon Glow	Neon Işıma
 	New Guide Layout	Yeni Kılavuz Düzeni
 	New Path	Yeni Yol
@@ -3784,7 +3775,7 @@ cameraData	Lens	Lens
 	There is no crop size or ratio to save	Kaydedilecek kırpma boyutu veya oranı yok
 	Search settings…	Arama ayarları…
 	No matching settings	Eşleşen ayar yok
-	PhotoCraft — Screen Color Picker	PhotoCraft — Ekran Rengi Seçici
+	Lumbra — Screen Color Picker	Lumbra — Ekran Rengi Seçici
 	Loading fonts…	Yazı tipleri yükleniyor…
 	Onion Skin	Soğan Kabuğu
 	Marching Ants	Yürüyen Karıncalar

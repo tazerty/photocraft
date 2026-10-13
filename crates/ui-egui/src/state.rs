@@ -413,25 +413,26 @@ impl Tool {
             Tool::Rectangle | Tool::EllipseShape | Tool::Triangle | Tool::Polygon | Tool::Line | Tool::CustomShape => 'U',
         }
     }
-    /// Glyph drawn in the toolbar (vector icons come later).
+    /// Glyph drawn in the toolbar (vector icons come later). Evora build (patch E10): letters (the
+    /// tool's shortcut key) instead of emoji and symbols the UI fonts don't draw.
     pub fn glyph(self) -> &'static str {
         match self {
-            Tool::Move => "✥",
-            Tool::RectMarquee => "⬚",
-            Tool::EllipseMarquee => "◌",
-            Tool::Brush => "🖌",
-            Tool::MixerBrush => "🖌",
+            Tool::Move => "V",
+            Tool::RectMarquee => "M",
+            Tool::EllipseMarquee => "M",
+            Tool::Brush => "B",
+            Tool::MixerBrush => "B",
             Tool::Eraser => "⌫",
-            Tool::Eyedropper => "💧",
-            Tool::ColorSampler => "◎",
+            Tool::Eyedropper => "I",
+            Tool::ColorSampler => "I",
             Tool::Lasso | Tool::PolygonLasso | Tool::MagneticLasso => "L",
             Tool::MagicWand => "W",
             Tool::Crop => "C",
             Tool::Gradient | Tool::PaintBucket => "G",
             Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask => "T",
-            Tool::Hand => "✋",
-            Tool::RotateView => "🧭",
-            Tool::Zoom => "🔍",
+            Tool::Hand => "H",
+            Tool::RotateView => "R",
+            Tool::Zoom => "Z",
             _ => "•",
         }
     }

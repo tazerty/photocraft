@@ -200,7 +200,8 @@ pub fn mnemonic_text(ui: &Ui, prefix: &str, label: &str, mnemonic: Option<char>,
 }
 
 /// The checkmark menu rows draw in their gutter.
-pub const CHECK_MARK: &str = "✔ ";
+// Evora build (patch E10): U+2713, drawn by Inter, rather than the emoji-only U+2714.
+pub const CHECK_MARK: &str = "✓ ";
 
 /// Width of the checkmark column every menu row reserves (#5705): the width of [`CHECK_MARK`] in
 /// the button font, so checked, unchecked and plain rows (and submenu headers) all start their

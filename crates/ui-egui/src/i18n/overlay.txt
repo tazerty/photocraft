@@ -1,0 +1,52 @@
+# Evora build (patch E9): display overlay catalog. Applied to every string the UI shows through
+# the translation lookups (tr, tr_ctx, tr_id, trn), English included, after the language catalog.
+# It renames third-party product terms at display time only: command ids, catalog keys, the engine
+# crates, the control channel and saved files keep the upstream wording.
+#
+# Columns, separated by a TAB:  kind <TAB> language <TAB> from [<TAB> to]
+#   kind      exact   the whole displayed string equals `from`: it becomes `to`
+#             sub     every occurrence of `from` inside the displayed string becomes `to`
+#             drop    the word `from` is removed with the space next to it (no `to` column)
+#   language  a catalog code (fr, zh-hans, ...), `en`, or * for every language
+# Exact rules are tried first (the language's, then *); sub and drop rules then apply in file
+# order, the language's and the * ones alike. Lines starting with # and blank lines are ignored.
+#
+# Sensitive terms checked by the CI gate after this overlay: Lumetri, Lightroom, Acrobat, Premiere
+# (and "Premiere Pro Compatible"), Adobe, Cycore. Only "Adobe" occurs in this repository.
+
+# Preferences > General > Color Picker: the built-in picker.
+exact	*	Adobe	Built-in
+exact	cs	Adobe	Vestavěný
+exact	de	Adobe	Integriert
+exact	el	Adobe	Ενσωματωμένο
+exact	es	Adobe	Integrado
+exact	fr	Adobe	Intégré
+exact	hu	Adobe	Beépített
+exact	id	Adobe	Bawaan
+exact	it	Adobe	Integrato
+exact	ja	Adobe	内蔵
+exact	ko	Adobe	내장
+exact	nl	Adobe	Ingebouwd
+exact	pl	Adobe	Wbudowany
+exact	pt-br	Adobe	Integrado
+exact	ru	Adobe	Встроенный
+exact	tr	Adobe	Yerleşik
+exact	uk	Adobe	Вбудований
+exact	vi	Adobe	Tích hợp sẵn
+exact	zh-hans	Adobe	内置
+exact	zh-hant	Adobe	內建
+
+# RGB working space with the published Adobe RGB (1998) primaries: ClayRGB, the open name already
+# accepted as an alias by photocraft-cms (`clayrgb`).
+sub	*	Adobe-RGB(1998)	ClayRGB(1998)
+sub	*	Adobe RGB (1998)	ClayRGB (1998)
+sub	*	Adobe RGB	ClayRGB
+sub	*	Adobe rgb	ClayRGB
+sub	*	Adobe-rgb	ClayRGB
+
+# Paragraph composers and PDF presets: the generic names.
+sub	hu	Adobe egysoros	Egysoros
+sub	hu	Adobe többsoros	Többsoros
+sub	nl	Adobe-zetmachine	Zetmachine
+sub	*	Adobe PDF	PDF
+drop	*	Adobe

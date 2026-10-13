@@ -19,8 +19,8 @@ Portes :
      n'est admis que dessiné par une police de texte ; bloquante pour les catalogues ; pour les
      littéraux du code d'ui-egui, bloquante si EVORA_GATE_CODE_EMOJI=block, sinon mesure ;
   5. termes sensibles (E9) : Lumetri, Lightroom, Acrobat, Premiere, Adobe, Cycore dans les
-     catalogues affichés après le catalogue de surcharge (i18n/overlay.tsv s'il existe) ; bloquante
-     si EVORA_GATE_TERMS=block, sinon mesure ;
+     catalogues affichés après le catalogue de surcharge (i18n/overlay.txt s'il existe), pour
+     chaque langue et pour l'anglais ; bloquante si EVORA_GATE_TERMS=block, sinon mesure ;
   6. précompression et CSP (bloquante) : .br et .gz pour chaque .wasm, .js, .html ; csp-hashes.txt ;
   7. taille (mesure) : .wasm brut, .gz, .br.
 """
@@ -388,22 +388,36 @@ def code_literal_audit(stack) -> list[str]:
     return found
 
 
-def overlay_rules() -> list[tuple[str, str]]:
-    f = I18N / "overlay.tsv"
+def overlay_rules() -> list[tuple[str, str, str, str]]:
+    """Règles de crates/ui-egui/src/i18n/overlay.txt (patch E9), lues comme le fait overlay.rs :
+    type (exact, sub ou drop), langue (code ou *), motif, remplacement."""
+    f = I18N / "overlay.txt"
     if not f.exists():
         return []
     rules = []
-    for line in f.read_text(encoding="utf-8").split("\n"):
+    for n, line in enumerate(f.read_text(encoding="utf-8").split("\n"), 1):
         if line.startswith("#") or not line.strip():
             continue
-        a, _, b = line.partition("\t")
-        rules.append((a, b))
+        cols = line.split("\t")
+        want = {"exact": 4, "sub": 4, "drop": 3}.get(cols[0])
+        if want is None or len(cols) != want or not cols[2]:
+            fail(f"overlay.txt ligne {n} mal formée : {line!r}")
+            continue
+        rules.append((cols[0], cols[1].lower(), cols[2], cols[3] if want == 4 else ""))
     return rules
 
 
-def apply_overlay(text: str, rules) -> str:
-    for a, b in rules:
-        text = text.replace(a, b)
+def apply_overlay(text: str, lang: str, rules) -> str:
+    """Même résolution qu'overlay.rs : règle exacte de la langue, puis exacte « * », sinon les
+    règles sub et drop applicables, dans l'ordre du fichier."""
+    for want in (lang, "*"):
+        for kind, rl, a, b in rules:
+            if kind == "exact" and rl == want and a == text:
+                return b
+    for kind, rl, a, b in rules:
+        if kind == "exact" or rl not in ("*", lang) or a not in text:
+            continue
+        text = text.replace(a + " ", "").replace(" " + a, "") if kind == "drop" else text.replace(a, b)
     return text
 
 
@@ -412,8 +426,9 @@ def gate_terms(entries) -> None:
     strict = os.environ.get("EVORA_GATE_TERMS", "report") == "block"
     before, after, left = {}, {}, []
     for lang, src, tr in entries:
-        for col, text in (("en", src), (lang, tr)):
-            shown = apply_overlay(text, rules)
+        # La source anglaise s'affiche en anglais et en repli dans la langue du catalogue.
+        for col, text in (("en", src), (lang, src), (lang, tr)):
+            shown = apply_overlay(text, col, rules)
             for t in SENSITIVE:
                 before[t] = before.get(t, 0) + text.count(t)
                 k = shown.count(t)

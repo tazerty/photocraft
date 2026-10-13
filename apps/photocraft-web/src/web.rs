@@ -60,6 +60,10 @@ pub fn start() {
         let q = query();
         // Evora build (patch E3): the UI language the host imposes (`?lang=`).
         let forced_language = host_language(query_param(&q, "lang").as_deref());
+        // Evora build (patch E5): the storage namespace, before any storage is read, and the
+        // host's `evora:purge` (accepted from `?parentOrigin=` only).
+        crate::storage_ns::init(query_param(&q, "storageNs").as_deref());
+        crate::storage_ns::listen_purge(query_param(&q, "parentOrigin"), crate::indexed_presets::DATABASE);
         let force_cpu = q.contains("cpu");
         let mut options = eframe::WebOptions::default();
         photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
@@ -71,7 +75,10 @@ pub fn start() {
         // Hydrate before constructing an interactive session: a late load must never undo a
         // user deletion/reorder. Storage denial or timeout still opens a usable session.
         let (database, presets, mut preset_warnings) = match crate::indexed_presets::load().await {
-            Ok((db, bridge, warnings)) => (Some(db), bridge, warnings),
+            Ok((db, bridge, warnings)) => {
+                crate::storage_ns::register_database(&db);
+                (Some(db), bridge, warnings)
+            }
             Err(e) => {
                 let bridge = crate::preset_bridge::Bridge::default();
                 bridge.unavailable(e);
@@ -316,6 +323,11 @@ struct WebShell {
 
 impl WebShell {
     fn save_presets(&mut self, ctx: &egui::Context) {
+        // Evora build (patch E5): after `evora:purge` nothing is written back.
+        if crate::storage_ns::purged() {
+            self.unsaved.store(false, Ordering::Relaxed);
+            return;
+        }
         if let Some(db) = self.database.clone()
             && let Some(batch) = self.presets.begin()
         {
@@ -494,9 +506,13 @@ fn services(inbox: Inbox, place_inbox: Inbox, cursor_pos: photocraft_ui_egui::Cu
             log::warn!("photocraft-web: external link not opened (Evora build): {url}");
             Ok(())
         })),
-        // Preferences live in the browser's localStorage.
-        load_prefs: Some(Box::new(|| local_storage()?.get_item(PREFS_KEY).ok().flatten())),
-        save_prefs: Some(Box::new(|text: &str| local_storage().ok_or("no localStorage")?.set_item(PREFS_KEY, text).map_err(|e| format!("{e:?}")))),
+        // Preferences live in the browser's localStorage, under the host's storage namespace
+        // (patch E5). A refused or purged namespace reads nothing and writes nothing.
+        load_prefs: Some(Box::new(|| local_storage()?.get_item(&crate::storage_ns::key(PREFS_KEY)?).ok().flatten())),
+        save_prefs: Some(Box::new(|text: &str| {
+            let Some(key) = crate::storage_ns::key(PREFS_KEY) else { return Ok(()) };
+            local_storage().ok_or("no localStorage")?.set_item(&key, text).map_err(|e| format!("{e:?}"))
+        })),
         ..Default::default()
     }
 }

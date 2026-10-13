@@ -22,6 +22,10 @@ mod preset_bridge;
 #[cfg(target_arch = "wasm32")]
 mod indexed_presets;
 
+// Evora build (patch E5): the host's storage namespace (`?storageNs=`) and `evora:purge`.
+#[cfg(target_arch = "wasm32")]
+mod storage_ns;
+
 #[cfg(target_arch = "wasm32")]
 mod web;
 

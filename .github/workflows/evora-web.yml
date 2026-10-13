@@ -1,0 +1,277 @@
+# Evora web : CI du fork tazerty/photocraft, futur moteur d'Evora Lumbra (patch EVORA-LUM-00).
+#
+# Écrite par Evora à partir de packaging/web/package.sh, packaging/env.sh et de la section
+# « Web build » de docs/development.md (code du dépôt, MIT OR Apache-2.0). Rien n'est repris de
+# storytold/craft-common-actions. Aucune action tierce : seules actions/checkout, actions/cache et
+# actions/upload-artifact, épinglées par SHA complet. Les outils de build sont téléchargés depuis
+# leurs releases officielles à une version fixe et vérifiés par SHA-256 ; Trunk tourne hors ligne,
+# il ne peut donc rien télécharger d'autre.
+#
+# Sortie : artefact evora-photocraft-web-<tag> (zip du site statique + SHA256SUMS). Le nom reste
+# celui de l'amont tant que le patch E1 (retrait des marques ArtCraft) n'est pas posé.
+name: Evora web
+
+on:
+  push:
+    branches: ["evora/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evora-web-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  # Tag amont épinglé (D-19) et son commit.
+  UPSTREAM_TAG: v0.8.2
+  UPSTREAM_COMMIT: d43db3e153c76aefce9b32cef9099e458eaf17a8
+  # Pas de rust-toolchain(.toml) au tag : stable exacte, >= rust-version 1.95 du workspace.
+  RUST_TOOLCHAIN: 1.99.0
+  # Trunk 0.21.14 (même version que la CI amont), binaire officiel trunk-rs.
+  TRUNK_VERSION: 0.21.14
+  TRUNK_SHA256: f2b4680cd239693a646a2795e4633c625328d7b2a044fbe749fa3a2fe9e7036b
+  # wasm-bindgen : version imposée par Cargo.lock ; Trunk exige cette version exacte.
+  WASM_BINDGEN_VERSION: 0.2.129
+  WASM_BINDGEN_SHA256: 82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e
+  # wasm-opt : version par défaut de Trunk 0.21.14 (celle que l'amont obtient sans réglage).
+  BINARYEN_VERSION: version_123
+  BINARYEN_SHA256: e959f2170af4c20c552e9de3a0253704d6a9d2766e8fdb88e4d6ac4bae9388fe
+  # Plafond de packaging/web/package.sh (24 MiB), affiché pour information seulement.
+  UPSTREAM_WASM_LIMIT_BYTES: "25165824"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  web:
+    name: Build web (wasm) et empaquetage
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 50
+
+      - name: Vérifier la base amont
+        run: |
+          git cat-file -e "${UPSTREAM_COMMIT}^{commit}" \
+            || { echo "::error::commit amont ${UPSTREAM_COMMIT} absent de l'historique récupéré"; exit 1; }
+          git merge-base --is-ancestor "$UPSTREAM_COMMIT" HEAD \
+            || { echo "::error::la branche ne descend pas de ${UPSTREAM_TAG} (${UPSTREAM_COMMIT})"; exit 1; }
+          version=$(awk '/^\[/ { in_pkg = ($0 == "[workspace.package]"); next }
+            in_pkg && $1 == "version" { gsub(/[" ]/, "", $3); print $3; exit }' Cargo.toml)
+          [ "$version" = "${UPSTREAM_TAG#v}" ] \
+            || { echo "::error::Cargo.toml annonce $version, attendu ${UPSTREAM_TAG#v}"; exit 1; }
+          echo "UPSTREAM_VERSION=$version" >> "$GITHUB_ENV"
+          echo "Base amont ${UPSTREAM_TAG} (${UPSTREAM_COMMIT}) vérifiée ; HEAD $(git rev-parse HEAD)"
+
+      - name: Toolchain Rust (rustup)
+        run: |
+          if [ -f rust-toolchain.toml ] || [ -f rust-toolchain ]; then
+            echo "::notice::rust-toolchain du dépôt utilisé"
+            cat rust-toolchain.toml rust-toolchain 2>/dev/null || true
+            rustup toolchain install --no-self-update
+          else
+            rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --no-self-update
+            rustup default "$RUST_TOOLCHAIN"
+          fi
+          rustup target add wasm32-unknown-unknown
+          rustc -Vv
+          cargo -V
+          echo "RUSTC_VERSION=$(rustc -V)" >> "$GITHUB_ENV"
+
+      - name: Cache cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: evora-web-${{ runner.os }}-rust-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            evora-web-${{ runner.os }}-rust-${{ env.RUST_TOOLCHAIN }}-
+
+      - name: Outils de build épinglés (Trunk, wasm-bindgen, wasm-opt)
+        run: |
+          tools="$RUNNER_TEMP/evora-tools"
+          mkdir -p "$tools/dl" "$tools/bin" "$tools/wasm-bindgen" "$tools/binaryen"
+          fetch() { # url fichier sha256
+            curl -fsSL --retry 3 --proto '=https' --tlsv1.2 "$1" -o "$tools/dl/$2"
+            echo "$3  $tools/dl/$2" | sha256sum -c -
+          }
+          fetch "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" \
+            trunk.tar.gz "$TRUNK_SHA256"
+          tar -xzf "$tools/dl/trunk.tar.gz" -C "$tools/bin" trunk
+          fetch "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${WASM_BINDGEN_VERSION}/wasm-bindgen-${WASM_BINDGEN_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            wasm-bindgen.tar.gz "$WASM_BINDGEN_SHA256"
+          tar -xzf "$tools/dl/wasm-bindgen.tar.gz" -C "$tools/wasm-bindgen"
+          fetch "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" \
+            binaryen.tar.gz "$BINARYEN_SHA256"
+          tar -xzf "$tools/dl/binaryen.tar.gz" -C "$tools/binaryen"
+          rm -f "$tools"/dl/*.tar.gz
+          wb=$(find "$tools/wasm-bindgen" -type f -name wasm-bindgen -print -quit)
+          wo=$(find "$tools/binaryen" -type f -name wasm-opt -print -quit)
+          [ -n "$wb" ] && [ -n "$wo" ] || { echo "::error::wasm-bindgen ou wasm-opt introuvable après extraction"; exit 1; }
+          echo "$tools/bin" >> "$GITHUB_PATH"
+          dirname "$wb" >> "$GITHUB_PATH"
+          dirname "$wo" >> "$GITHUB_PATH"
+
+      - name: Versions des outils
+        run: |
+          trunk --version
+          wasm-bindgen --version
+          wasm-opt --version
+          [ "$(wasm-bindgen --version | cut -d' ' -f2)" = "$WASM_BINDGEN_VERSION" ]
+          [ "version_$(wasm-opt --version | cut -d' ' -f3)" = "$BINARYEN_VERSION" ]
+
+      - name: Dépendances (Cargo.lock verrouillé)
+        run: cargo fetch --locked
+
+      - name: Build web release (Trunk, hors ligne)
+        working-directory: apps/photocraft-web
+        run: |
+          export PHOTOCRAFT_BUILD_SHA="$GITHUB_SHA"
+          export PHOTOCRAFT_BUILD_DATE="$(date -u +%Y-%m-%d)"
+          # index.html choisit le profil wasm-release, la feature heif et wasm-opt -Oz.
+          trunk --offline build --release --locked
+          test -s ../../dist/web/index.html
+          git diff --exit-code -- ../../Cargo.lock
+
+      - name: Empaquetage du site statique
+        run: |
+          site="dist/web"
+          # Même contrôle que package.sh : URL relatives (public_url = "./"), le site doit
+          # fonctionner sous n'importe quel préfixe et dans une iframe.
+          if grep -Eq '(src|href)="/[^/]' "$site/index.html"; then
+            echo "::error::$site/index.html contient des URL absolues depuis la racine"
+            exit 1
+          fi
+          ls "$site"/*.wasm >/dev/null
+          name="evora-photocraft-web-${UPSTREAM_TAG}"
+          work="$RUNNER_TEMP/evora-package"
+          out="$RUNNER_TEMP/evora-out"
+          rm -rf "$work" "$out"
+          mkdir -p "$work/$name/LICENSES" "$out"
+          cp -R "$site/." "$work/$name/"
+          # Licences et mentions (liste du Dockerfile amont). Contrairement à package.sh, ni
+          # _headers ni .htaccess ni HOSTING.md : l'hébergement est l'affaire d'Evora (LUM-08).
+          cp LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md \
+            assets/fonts/OFL-*.txt assets/icons/LICENSE-*.txt assets/dict/LICENSE-*.txt \
+            crates/ui-egui/src/i18n/LICENSE-translations.txt \
+            "$work/$name/LICENSES/"
+          {
+            echo "upstream: storytold/photocraft ${UPSTREAM_TAG} (${UPSTREAM_COMMIT})"
+            echo "fork: ${GITHUB_REPOSITORY} ${GITHUB_REF_NAME} (${GITHUB_SHA})"
+            echo "run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "rustc: ${RUSTC_VERSION}"
+            echo "trunk: ${TRUNK_VERSION}"
+            echo "wasm-bindgen: ${WASM_BINDGEN_VERSION}"
+            echo "wasm-opt: ${BINARYEN_VERSION}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$work/$name/EVORA-BUILD.txt"
+          (cd "$work" && zip -qrX9 "$out/$name.zip" "$name")
+          (cd "$out" && sha256sum "$name.zip" > SHA256SUMS)
+          cat "$out/SHA256SUMS"
+          ls -l "$out"
+          echo "EVORA_PKG_DIR=$work/$name" >> "$GITHUB_ENV"
+          echo "EVORA_OUT_DIR=$out" >> "$GITHUB_ENV"
+          echo "EVORA_ARTIFACT=$name" >> "$GITHUB_ENV"
+
+      - name: Garde-fous (non bloquants, résumé du job)
+        continue-on-error: true
+        run: |
+          # Mesures seulement : aucune commande de ce pas ne doit interrompre le résumé.
+          set +e +o pipefail
+          pkg="$EVORA_PKG_DIR"
+          sum="$GITHUB_STEP_SUMMARY"
+          count() { # motif fichier...
+            local pattern="$1"; shift
+            cat "$@" 2>/dev/null | grep -a -o -F -- "$pattern" | wc -l | tr -d ' '
+          }
+          # Catalogues de traduction : build.rs de ui-egui les inclut compressés (deflate) dans le
+          # wasm. On les mesure décompressés depuis le OUT_DIR du build courant, et à la source.
+          inflated="$RUNNER_TEMP/evora-catalogs"
+          mkdir -p "$inflated"
+          outdir=$(find target -type f -path '*photocraft-ui-egui-*/out/i18n/keys.deflate' -printf '%T@ %h\n' \
+            | sort -rn | head -n 1 | cut -d' ' -f2-)
+          if [ -n "$outdir" ]; then
+            for f in "$outdir"/*.deflate; do
+              python3 -I -c 'import sys, zlib
+          data = open(sys.argv[1], "rb").read()
+          for wbits in (-15, 15, 31):
+              try:
+                  sys.stdout.buffer.write(zlib.decompress(data, wbits)); break
+              except zlib.error:
+                  pass' "$f" > "$inflated/$(basename "$f").txt"
+            done
+          fi
+          n_inflated=$(find "$inflated" -type f -size +0 | wc -l | tr -d ' ')
+          {
+            echo "## Evora web : ${EVORA_ARTIFACT}"
+            echo
+            echo "| Élément | Valeur |"
+            echo "| --- | --- |"
+            echo "| Amont | storytold/photocraft \`${UPSTREAM_TAG}\` (\`${UPSTREAM_COMMIT}\`) |"
+            echo "| Branche | \`${GITHUB_REF_NAME}\` (\`${GITHUB_SHA}\`) |"
+            echo "| Toolchain | ${RUSTC_VERSION} ; Trunk ${TRUNK_VERSION} ; wasm-bindgen ${WASM_BINDGEN_VERSION} ; wasm-opt ${BINARYEN_VERSION} |"
+            echo "| Archive | \`${EVORA_ARTIFACT}.zip\`, $(wc -c < "$EVORA_OUT_DIR/${EVORA_ARTIFACT}.zip" | tr -d ' ') octets |"
+            echo "| SHA-256 | \`$(cut -d' ' -f1 "$EVORA_OUT_DIR/SHA256SUMS")\` |"
+            echo
+            echo "### Fichiers d'hébergement dans l'archive"
+            echo
+            hosting=$(cd "$pkg" && find . \( -name '_headers' -o -name '.htaccess' -o -name '*.conf' \
+              -o -name '*.php' -o -name '.*' -o -type l \) ! -name '.' -print | sort)
+            if [ -n "$hosting" ]; then
+              echo "Présents (à retirer, LUM-08) :"
+              echo
+              echo "$hosting" | sed 's/^/- `/; s/$/`/'
+            else
+              echo "Aucun (\`_headers\`, \`.htaccess\`, \`*.conf\`, \`*.php\`, fichiers cachés, liens symboliques)."
+            fi
+            echo
+            echo "### Taille du WebAssembly"
+            echo
+            echo "| Fichier | Octets | MiB | gzip -9 | brotli -q 11 | Plafond amont 24 MiB |"
+            echo "| --- | ---: | ---: | ---: | ---: | --- |"
+            for wasm in "$pkg"/*.wasm; do
+              bytes=$(wc -c < "$wasm" | tr -d ' ')
+              mib=$(awk -v n="$bytes" 'BEGIN { printf "%.2f", n / 1048576 }')
+              gz=$(gzip -9 -c "$wasm" | wc -c | tr -d ' ')
+              if command -v brotli >/dev/null; then br=$(brotli -c -q 11 "$wasm" | wc -c | tr -d ' '); else br="n/d"; fi
+              if [ "$bytes" -gt "$UPSTREAM_WASM_LIMIT_BYTES" ]; then gate="au-dessus"; else gate="en dessous"; fi
+              echo "| \`$(basename "$wasm")\` | $bytes | $mib | $gz | $br | $gate |"
+            done
+            echo
+            echo "### Marques (mesure de la cible E1)"
+            echo
+            echo "| Terme | wasm + js + html servis | catalogues décompressés du build ($n_inflated fichiers) | catalogues source (.tsv) |"
+            echo "| --- | ---: | ---: | ---: |"
+            for term in ArtCraft getartcraft discord.gg PhotoCraft; do
+              b=$(count "$term" "$pkg"/*.wasm "$pkg"/*.js "$pkg"/index.html)
+              c=$(count "$term" "$inflated"/*.txt)
+              s=$(count "$term" crates/ui-egui/src/i18n/*.tsv)
+              echo "| \`$term\` | $b | $c | $s |"
+            done
+            echo
+            echo "Garde-fous non bloquants pour cette première passe (EVORA-LUM-00) ; ils deviendront des portes avec E1 et LUM-08."
+          } >> "$sum"
+          cat "$sum"
+          exit 0
+
+      - name: Artefact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ env.EVORA_ARTIFACT }}
+          path: |
+            ${{ env.EVORA_OUT_DIR }}/${{ env.EVORA_ARTIFACT }}.zip
+            ${{ env.EVORA_OUT_DIR }}/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0

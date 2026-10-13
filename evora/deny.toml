@@ -19,7 +19,16 @@ exclude-dev = true
 unmaintained = "all"
 unsound = "all"
 yanked = "deny"
-ignore = []
+# Exceptions explicites, relevées par la porte au premier passage (run 38367884596) : crates
+# transitives du graphe amont, sans vulnérabilité connue ; les remplacer imposerait de modifier
+# Cargo.lock et les crates de l'amont (hors périmètre du fork). Chaque exception reste visible
+# dans le journal (note de cargo-deny) et dans apps/lumbra/UPSTREAM.md ; à revoir à chaque montée.
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15 non maintenu (macro de compilation, aucune vulnérabilité), transitif via l'amont" },
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz 0.20.1 non maintenu (aucune vulnérabilité), transitif via l'amont ; l'amont migre vers harfrust" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser 0.25.1 non maintenu (aucune vulnérabilité), transitif via l'amont" },
+    { crate = "yoke-derive@0.8.3", reason = "version retirée (yanked) épinglée par le Cargo.lock de l'amont ; mise à jour = modification du verrou de l'amont" },
+]
 
 [licenses]
 # Licences permissives admises pour le code embarqué dans le wasm. Aucune licence copyleft (GPL,
@@ -31,16 +40,21 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
-    "ISC",
     "Zlib",
     "0BSD",
-    "BSL-1.0",
     "CC0-1.0",
     "Unlicense",
     "Unicode-3.0",
 ]
 confidence-threshold = 0.8
-exceptions = []
+# Exceptions par crate, limitées aux licences de données qu'elles embarquent.
+exceptions = [
+    # Polices par défaut d'egui (Ubuntu Light, Hack, emoji-icon-font ; Noto Emoji retirée par E10) :
+    # licences de polices libres, incorporation dans une application permise.
+    { crate = "epaint_default_fonts", allow = ["OFL-1.1", "Ubuntu-font-1.0"] },
+    # Encodeur JPEG dérivé du code de l'Independent JPEG Group : licence IJG, permissive avec mention.
+    { crate = "jpeg-encoder", allow = ["IJG"] },
+]
 
 [licenses.private]
 # Les crates du dépôt non publiées (photocraft-*) sont sous MIT OR Apache-2.0 (Cargo.toml du

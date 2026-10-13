@@ -141,7 +141,8 @@ jobs:
           export PHOTOCRAFT_BUILD_SHA="$GITHUB_SHA"
           export PHOTOCRAFT_BUILD_DATE="$(date -u +%Y-%m-%d)"
           # index.html choisit le profil wasm-release, la feature heif et wasm-opt -Oz.
-          trunk --offline build --release --locked
+          # --offline accepte une valeur facultative : sans « =true », il avalerait « build ».
+          trunk --offline=true build --release --locked
           test -s ../../dist/web/index.html
           git diff --exit-code -- ../../Cargo.lock
 

@@ -21,6 +21,7 @@
 //!   translators may reorder placeholders freely.
 
 mod catalog;
+pub mod overlay;
 mod system;
 
 pub use system::system_lang;
@@ -428,19 +429,20 @@ pub fn t(s: &str) -> &str {
     tr(current(), s)
 }
 
-/// Translate an English UI string; unknown strings come back unchanged.
+/// Translate an English UI string; unknown strings come back unchanged. Evora build (patch E9):
+/// the result goes through the display overlay ([`overlay`]).
 pub fn tr(lang: Lang, s: &str) -> &str {
-    lang.catalog().plain(s).unwrap_or(s)
+    overlay::apply(lang.code(), lang.catalog().plain(s).unwrap_or(s))
 }
 
 /// Like [`tr`], for an English string that needs a disambiguating `context`.
 pub fn tr_ctx<'a>(lang: Lang, context: &str, s: &'a str) -> &'a str {
-    lang.catalog().contextual(context, s).unwrap_or_else(|| tr(lang, s))
+    overlay::apply(lang.code(), lang.catalog().contextual(context, s).unwrap_or_else(|| tr(lang, s)))
 }
 
 /// A string keyed by its command id, falling back to the translation of the English `label`.
 pub fn tr_id<'a>(lang: Lang, id: &str, label: &'a str) -> &'a str {
-    lang.catalog().id(id).unwrap_or_else(|| tr(lang, label))
+    overlay::apply(lang.code(), lang.catalog().id(id).unwrap_or_else(|| tr(lang, label)))
 }
 
 /// Fill `{name}` placeholders. Unknown placeholders are left as written.
@@ -456,7 +458,7 @@ pub fn fmt(template: &str, args: &[(&str, &str)]) -> String {
 pub fn trn(lang: Lang, n: u64, one: &str, other: &str) -> String {
     let idx = (lang.0.plural)(n);
     let text = lang.catalog().plural(one, other, idx).unwrap_or(if n == 1 { one } else { other });
-    fmt(text, &[("n", &n.to_string())])
+    fmt(overlay::apply(lang.code(), text), &[("n", &n.to_string())])
 }
 
 #[cfg(test)]

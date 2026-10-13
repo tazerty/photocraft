@@ -11,8 +11,9 @@
 # doublons en avertissement), cargo-about (LICENSES/THIRD-PARTY-RUST.html), marques ArtCraft,
 # fichiers d'hébergement, LICENSES/ complet, émojis des catalogues affichés (résolus dans la pile de
 # polices d'egui), précompression .br/.gz et empreintes CSP, test de fumée Chrome sans interface en
-# origine différente (evora/ci/). Chaque porte s'exécute même si une autre échoue ; le bilan échoue
-# s'il en manque une, et l'artefact n'est publié qu'après un bilan vert.
+# origine différente (evora/ci/), hors pont puis avec le pont hôte EHP v1 (E4, scénario « pont-ehp »).
+# Chaque porte s'exécute même si une autre échoue ; le bilan échoue s'il en manque une, et l'artefact
+# n'est publié qu'après un bilan vert.
 #
 # Sortie : artefact evora-lumbra-web-<tag> (evora-lumbra-web-<tag>.zip : site statique, .br et .gz,
 # LICENSES/, csp-hashes.txt ; evora-lumbra-fonts-<tag>.zip : polices servies à part ; SHA256SUMS ;
@@ -266,6 +267,9 @@ jobs:
             "$work/$name/LICENSES/"
           # Patch E1 : la seule mention ArtCraft conservée, en texte simple, vit dans les mentions.
           cp evora/MENTIONS.txt "$work/$name/LICENSES/MENTIONS.txt"
+          # Patch E4 : origines parentes admises par le pont EHP (?host=evora). Vide dans l'artefact :
+          # le provisionnement d'Evora l'écrit (HOST-PROTOCOL §2.3) ; vide, le pont reste muet.
+          printf '{"parentOrigins": []}\n' > "$work/$name/evora-host.json"
           # Licences des crates Rust embarquées (cargo-about), si la porte l'a produit.
           if [ -s "$RUNNER_TEMP/evora-about/THIRD-PARTY-RUST.html" ]; then
             cp "$RUNNER_TEMP/evora-about/THIRD-PARTY-RUST.html" "$work/$name/LICENSES/"
@@ -356,7 +360,7 @@ jobs:
       - name: Test de fumée (Chrome sans interface, origine différente)
         id: smoke
         continue-on-error: true
-        timeout-minutes: 10
+        timeout-minutes: 20
         env:
           CHROME_BIN: google-chrome
           SMOKE_TIMEOUT_MS: "180000"
@@ -372,7 +376,19 @@ jobs:
           SMOKE_EXPECT_FONTS: "1"
           SMOKE_STORAGE_NS: evoraSmokeNs0123
           SMOKE_PURGE: "1"
-        run: node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke.json" "$EVORA_FONTS_DIR"
+        run: |
+          set +e
+          # Hors pont : comportement amont, avec la langue, le thème et le stockage des patchs E2, E3, E5.
+          node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke.json" "$EVORA_FONTS_DIR"
+          hors_pont=$?
+          # E4 : pont hôte EHP v1 (?host=evora), coquille minimale et evora-host.json écrit par le banc
+          # (evora/ci/smoke_ehp.mjs). Les attentes du scénario hors pont ne s'appliquent pas ici.
+          SMOKE_SCENARIO=pont-ehp SMOKE_QUERY="host=evora&webgl" SMOKE_EXPECT_LANG= SMOKE_EXPECT_THEME= \
+            SMOKE_BROWSER_LANG= SMOKE_EXPECT_FONTS= SMOKE_STORAGE_NS= SMOKE_PURGE= \
+            node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-ehp.json" "$EVORA_FONTS_DIR"
+          pont=$?
+          echo "Test de fumée : hors pont $hors_pont, pont EHP $pont (0 = vert)"
+          [ "$hors_pont" -eq 0 ] && [ "$pont" -eq 0 ]
 
       - name: Bilan des portes
         env:

@@ -168,6 +168,8 @@ jobs:
             assets/fonts/OFL-*.txt assets/icons/LICENSE-*.txt assets/dict/LICENSE-*.txt \
             crates/ui-egui/src/i18n/LICENSE-translations.txt \
             "$work/$name/LICENSES/"
+          # Patch E1 : la seule mention ArtCraft conservée, en texte simple, vit dans les mentions.
+          cp evora/MENTIONS.txt "$work/$name/LICENSES/MENTIONS.txt"
           {
             echo "upstream: storytold/photocraft ${UPSTREAM_TAG} (${UPSTREAM_COMMIT})"
             echo "fork: ${GITHUB_REPOSITORY} ${GITHUB_REF_NAME} (${GITHUB_SHA})"

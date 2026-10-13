@@ -1,0 +1,23 @@
+Lumbra (Evora) : mentions / notices
+
+Lumbra est basé sur PhotoCraft par l'équipe ArtCraft.
+Lumbra is based on PhotoCraft by the ArtCraft team.
+
+Source amont / upstream source : https://github.com/storytold/photocraft (MIT OR Apache-2.0).
+Fork Evora / Evora fork : https://github.com/tazerty/photocraft (branche / branch evora/<tag>).
+
+ArtCraft, son nom et ses logos sont des marques de leurs titulaires ; ils ne sont pas couverts par
+les licences du code (docs/brand/LICENSE-brand.txt de l'amont). Lumbra n'est pas un produit
+ArtCraft et n'est ni approuvé ni soutenu par l'équipe ArtCraft. Les marques ArtCraft ont été
+retirées de cette version modifiée (patch Evora E1) ; seule cette mention en texte simple est
+conservée, comme le permet la licence de marque.
+
+ArtCraft, its name and its logos are trademarks of their owners and are not covered by the code
+licences (upstream docs/brand/LICENSE-brand.txt). Lumbra is not an ArtCraft product and is not
+endorsed or supported by the ArtCraft team. The ArtCraft marks were removed from this modified
+version (Evora patch E1); only this plain-text mention is kept, as the trademark licence allows.
+
+Les licences et avis de l'amont et des composants tiers sont fournis dans ce dossier (LICENSES/) :
+LICENSE-MIT, LICENSE-APACHE, NOTICE, ATTRIBUTION.md et les licences des polices, icônes,
+dictionnaires et traductions.
+The upstream and third-party licences and notices ship in this folder (LICENSES/).

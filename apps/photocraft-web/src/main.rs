@@ -12,7 +12,8 @@
 //! - dropped files are read asynchronously by `web::WebShell` and delivered through `Services::inbox`.
 //!
 //! URL query flags: `?cpu` forces the CPU canvas path (same as `PHOTOCRAFT_CPU_CANVAS=1`);
-//! `?webgl` forces the WebGL2 backend instead of WebGPU.
+//! `?webgl` forces the WebGL2 backend instead of WebGPU. Evora build: every parameter is read by
+//! name (LUM-01); `?host=evora` turns on the Evora host protocol bridge (patch E4, `ehp`).
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -25,6 +26,12 @@ mod indexed_presets;
 // Evora build (patch E5): the host's storage namespace (`?storageNs=`) and `evora:purge`.
 #[cfg(target_arch = "wasm32")]
 mod storage_ns;
+
+// Evora build (patch E4): the Evora host protocol bridge (EHP v1) and the host's documents.
+#[cfg(target_arch = "wasm32")]
+mod ehp;
+#[cfg(target_arch = "wasm32")]
+mod host_docs;
 
 #[cfg(target_arch = "wasm32")]
 mod web;

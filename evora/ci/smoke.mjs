@@ -15,11 +15,16 @@
 // niveau erreur, violation CSP, plantage de cible) pendant le démarrage et les 3 s qui suivent.
 // Seule exception admise et comptée : le 404 de fonts/manifest.txt, que l'amont traite comme le cas
 // normal d'un hôte sans polices servies (patch E6 à venir). Mesure imprimée : démarrage à froid.
+//
+// SMOKE_SCENARIO=pont-ehp (patch E4) : le moteur est chargé avec ?host=evora sous une coquille
+// minimale, le banc sert evora-host.json avec la seule page parente admise et exerce le protocole
+// hôte EHP v1 (evora/ci/smoke_ehp.mjs, qui décrit ce qu'il exige).
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import * as ehp from './smoke_ehp.mjs';
 
 // Quatrième argument facultatif (E6) : le dossier des polices servies à part, superposé au site.
 const [siteDir, cspFile, reportFile, fontsDir] = process.argv.slice(2);
@@ -39,6 +44,9 @@ const PURGE = process.env.SMOKE_PURGE === '1';
 // de cette écriture, et exigence de polices servies (manifeste lu, au moins une police reçue).
 const BROWSER_LANG = process.env.SMOKE_BROWSER_LANG || '';
 const EXPECT_FONTS = process.env.SMOKE_EXPECT_FONTS === '1';
+// E4 : scénario du pont hôte EHP v1.
+const SCENARIO = process.env.SMOKE_SCENARIO || 'hors-pont';
+const EHP = SCENARIO === ehp.SCENARIO;
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -68,6 +76,13 @@ function engineHandler(state) {
     const url = new URL(req.url, 'http://x');
     let rel = decodeURIComponent(url.pathname);
     if (rel.endsWith('/')) rel += 'index.html';
+    if (state.hostConfig && rel === '/evora-host.json') {
+      // Ce qu'écrit le provisionnement d'Evora à côté d'index.html (HOST-PROTOCOL §2.3).
+      report.served[`${rel} banc`] = (report.served[`${rel} banc`] || 0) + 1;
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+      res.end(state.hostConfig);
+      return;
+    }
     const file = roots.map((root) => path.resolve(root, '.' + rel))
       .find((f, i) => f.startsWith(roots[i] + path.sep) && fs.existsSync(f) && fs.statSync(f).isFile());
     if (!file) {
@@ -96,6 +111,28 @@ function engineHandler(state) {
     report.served[key] = (report.served[key] || 0) + 1;
     res.writeHead(200, headers);
     fs.createReadStream(body).pipe(res);
+  };
+}
+
+function ehpHandler(engineOrigin, parentOrigin, foreignOrigin) {
+  const engineSrc = `${engineOrigin}/index.html?${QUERY}`;
+  const assets = {
+    '/': ['text/html; charset=utf-8', ehp.parentPage(engineSrc, foreignOrigin, parentOrigin), ehp.parentCsp(engineOrigin, foreignOrigin)],
+    '/harness.js': ['text/javascript; charset=utf-8', ehp.harnessJs(), null],
+    '/witness.html': ['text/html; charset=utf-8', ehp.WITNESS_HTML, ehp.WITNESS_CSP],
+    '/witness.js': ['text/javascript; charset=utf-8', ehp.WITNESS_JS, null],
+  };
+  return (req, res) => {
+    const asset = assets[new URL(req.url, 'http://x').pathname];
+    if (!asset) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
+    const headers = { 'Content-Type': asset[0], 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
+    if (asset[2]) headers['Content-Security-Policy'] = asset[2];
+    res.writeHead(200, headers);
+    res.end(asset[1]);
   };
 }
 
@@ -191,15 +228,20 @@ async function main() {
   const engine = await listen(engineHandler(state));
   const engineOrigin = `http://127.0.0.1:${engine.address().port}`;
   // L'origine B n'est connue qu'une fois le port attribué : le gestionnaire la lit à chaque requête.
-  const origins = { parent: '' };
-  const parent = await listen((req, res) => parentHandler(engineOrigin, origins.parent)(req, res));
+  const origins = { parent: '', foreign: '' };
+  // E4 : une troisième origine (C, même hôte, autre port) sert la fenêtre témoin non admise.
+  const foreign = EHP ? await listen((req, res) => ehpHandler(engineOrigin, origins.parent, origins.foreign)(req, res)) : null;
+  origins.foreign = foreign ? `http://localhost:${foreign.address().port}` : '';
+  const parent = await listen((req, res) => (EHP ? ehpHandler(engineOrigin, origins.parent, origins.foreign) : parentHandler(engineOrigin, origins.parent))(req, res));
   const parentOrigin = `http://localhost:${parent.address().port}`;
   origins.parent = parentOrigin;
+  if (EHP) state.hostConfig = ehp.hostConfig(parentOrigin);
   state.policy = policyFor(parentOrigin);
   report.engineOrigin = engineOrigin;
   report.parentOrigin = parentOrigin;
   report.policy = state.policy;
-  log(`moteur : ${engineOrigin} ; parent : ${parentOrigin}`);
+  report.scenario = SCENARIO;
+  log(`scénario : ${SCENARIO} ; moteur : ${engineOrigin} ; parent : ${parentOrigin}${EHP ? ` ; témoin d'origine non admise : ${origins.foreign}` : ''}`);
 
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'evora-smoke-'));
   const args = [
@@ -226,10 +268,12 @@ async function main() {
     const where = msg.sessionId && msg.sessionId === frameSession ? 'moteur' : 'parent';
     switch (msg.method) {
       case 'Target.attachedToTarget':
-        if (p.targetInfo.type === 'iframe' && !frameSession) {
+        if (p.targetInfo.type === 'iframe' && !frameSession && (p.targetInfo.url || '').startsWith(engineOrigin)) {
           frameSession = p.sessionId;
           frameUrl = p.targetInfo.url;
           (async () => {
+            // E4 : le document moteur se croit au premier plan (le canvas peut prendre le focus clavier).
+            if (EHP) await c.send('Emulation.setFocusEmulationEnabled', { enabled: true }, frameSession).catch(() => {});
             await c.send('Runtime.enable', {}, frameSession);
             await c.send('Log.enable', {}, frameSession);
             await c.send('Page.enable', {}, frameSession);
@@ -282,9 +326,21 @@ async function main() {
   await c.send('Page.navigate', { url: `${parentOrigin}/` }, page);
   log('navigation de la page parente lancée');
 
+  // E4 : avec ?host=evora, le moteur annonce evora:ready puis attend evora:init avant de démarrer.
+  const bench = EHP ? new ehp.EhpBench({ c, page, frame: () => frameSession, engineOrigin, parentOrigin, log }) : null;
+  let handshake = true;
+  if (bench) {
+    try {
+      handshake = await bench.handshake();
+    } catch (e) {
+      bench.fail('bench', `poignée de main interrompue : ${e.message}`);
+      handshake = false;
+    }
+  }
+
   let last = null;
   let readyAt = null;
-  while (Date.now() - t0 < TIMEOUT_MS) {
+  while (handshake && Date.now() - t0 < TIMEOUT_MS) {
     await sleep(200);
     if (!frameSession) continue;
     try {
@@ -307,6 +363,14 @@ async function main() {
     await sleep(SETTLE_MS);
     const r = await c.send('Runtime.evaluate', { expression: STATE, returnByValue: true }, frameSession);
     last = JSON.parse(r.result.value);
+    if (bench) {
+      try {
+        await bench.session();
+      } catch (e) {
+        bench.fail('bench', `scénario interrompu : ${e.message}`);
+      }
+      await sleep(2000);
+    }
     const st = await c.send('Runtime.evaluate', { expression: STORAGE, returnByValue: true, awaitPromise: true }, frameSession);
     report.storage = JSON.parse(st.result.value);
     if (PURGE && STORAGE_NS) {
@@ -326,6 +390,10 @@ async function main() {
       report.purge = { witness, after };
     }
   }
+  if (bench) {
+    try { await bench.refresh(); } catch { /* journal déjà relevé */ }
+    report.ehp = { ids: bench.ids, exchanges: bench.summary(), problems: bench.verify(report.storage) };
+  }
   report.frame = { url: frameUrl, state: last };
   if (report.coldStartMs === undefined) report.coldStartMs = null;
   report.wallClockMs = readyAt ? readyAt - t0 : null;
@@ -335,8 +403,9 @@ async function main() {
   setTimeout(() => chrome.kill('SIGKILL'), 5000).unref();
   engine.close();
   parent.close();
+  if (foreign) foreign.close();
 
-  const problems = [...report.errors];
+  const problems = [...report.errors, ...(report.ehp ? report.ehp.problems : [])];
   if (!frameSession) problems.push("aucune iframe hors processus attachée : l'origine du moteur n'est pas distincte");
   if (!readyAt) problems.push(`le moteur n'a pas démarré en ${TIMEOUT_MS} ms : ${JSON.stringify(last)}`);
   if (last && last.origin !== engineOrigin) problems.push(`origine du document moteur inattendue : ${last && last.origin}`);
@@ -382,7 +451,9 @@ async function main() {
     `| Délai mesuré depuis la navigation parente | ${report.wallClockMs ?? '—'} ms |`,
     `| Canvas | ${last && last.canvas ? `${last.canvas.width}×${last.canvas.height}` : 'absent'} |`,
     `| Titre du document moteur | ${last ? last.title : '—'} |`,
+    `| Scénario | ${SCENARIO} |`,
     `| Paramètres du moteur | \`?${QUERY}\` |`,
+    ...(report.ehp ? [`| Échanges EHP vus de la page parente | ${report.ehp.exchanges.length} message(s) du moteur |`] : []),
     `| Stockage (localStorage / IndexedDB) | ${report.storage ? `${report.storage.keys.join(', ') || 'aucune clé'} / ${(report.storage.dbs || []).join(', ') || 'aucune base'}` : '—'} |`,
     `| Purge evora:purge (témoin / après) | ${report.purge ? `${report.purge.witness.keys.length} clé(s), ${(report.purge.witness.dbs || []).length} base(s) / ${report.purge.after.keys.length} clé(s), ${(report.purge.after.dbs || []).length} base(s)` : '—'} |`,
     `| Polices servies reçues | ${Object.keys(report.served).filter((k) => k.startsWith('/fonts/')).join(', ') || 'aucune'} |`,
@@ -399,6 +470,7 @@ async function main() {
   for (const w of report.warnings.slice(0, 20)) console.log(`avertissement : ${w}`);
   for (const m of report.console.slice(0, 30)) console.log(`console : ${m}`);
   for (const [k, v] of Object.entries(report.served)) console.log(`servi : ${k} ×${v}`);
+  if (report.ehp) for (const m of report.ehp.exchanges) console.log(`ehp : ${m}`);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text + '\n');
   process.exit(report.ok ? 0 : 1);
 }

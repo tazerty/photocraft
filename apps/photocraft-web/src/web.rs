@@ -58,6 +58,8 @@ pub fn start() {
             return;
         };
         let q = query();
+        // Evora build (patch E3): the UI language the host imposes (`?lang=`).
+        let forced_language = host_language(query_param(&q, "lang").as_deref());
         let force_cpu = q.contains("cpu");
         let mut options = eframe::WebOptions::default();
         photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
@@ -96,6 +98,11 @@ pub fn start() {
                     }
                     listen_pen(&pen_target, app.stylus.feed.clone());
                     app.set_theme(&cc.egui_ctx, ThemeKind::Pro);
+                    if let Some(code) = forced_language
+                        && let Err(e) = app.run("prefs.set", serde_json::json!({"values": {"interface.language": code}}))
+                    {
+                        log::warn!("photocraft-web: host language {code} not applied: {e}");
+                    }
                     if let Some(rs) = cc.wgpu_render_state.clone()
                         && !force_cpu
                     {
@@ -199,6 +206,40 @@ fn guard_unload(unsaved: Arc<AtomicBool>) {
 
 fn query() -> String {
     web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default()
+}
+
+/// The value of `key` in a query string (`?a=1&lang=fr`): exact key match (not a substring
+/// search), `+` read as a space, percent-decoded. `None` when the key is absent or undecodable.
+fn query_param(query: &str, key: &str) -> Option<String> {
+    query.trim_start_matches('?').split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+        if k != key {
+            return None;
+        }
+        js_sys::decode_uri_component(&v.replace('+', " ")).ok().map(String::from)
+    })
+}
+
+/// Evora build (patch E3): the engine language for the host's language tag (BCP 47, as Evora
+/// passes it: `fr`, `de-CH`, `zh-Hans`, `pt-BR`…). `zh-Hans`, `zh-CN` and `zh-SG` map to
+/// `zh-hans`; `zh-Hant`, `zh-TW`, `zh-HK` and `zh-MO` to `zh-hant`; other tags to their exact
+/// catalog, else to their primary language. `None` (the preference is left alone) for a missing or
+/// malformed tag, a language without a catalog (Arabic, Hindi: the host shows its own notice), and
+/// a bare `pt` or any Portuguese tag but `pt-BR`: no variant is chosen until decision D-23.
+fn host_language(tag: Option<&str>) -> Option<&'static str> {
+    let tag = tag?.trim().replace('_', "-").to_ascii_lowercase();
+    if tag.is_empty() || tag.len() > 35 || !tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    let primary = tag.split('-').next().unwrap_or_default();
+    let code = match tag.as_str() {
+        "zh-hans" | "zh-cn" | "zh-sg" | "zh-hans-cn" | "zh-hans-sg" => "zh-hans",
+        "zh-hant" | "zh-tw" | "zh-hk" | "zh-mo" | "zh-hant-tw" | "zh-hant-hk" | "zh-hant-mo" => "zh-hant",
+        "pt-br" => "pt-br",
+        _ if primary == "pt" || primary == "zh" => return None,
+        other => other,
+    };
+    i18n::Lang::from_code(code).or_else(|| i18n::Lang::from_code(primary)).map(|lang| lang.code())
 }
 
 /// Reads the served font manifest, if the host has one, and lists its families in the font menus.

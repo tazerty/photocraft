@@ -97,6 +97,7 @@ fn selected_theme(interface: &prefs::Interface, system: Option<egui::Theme>) -> 
             LightTheme::Classic => ThemeKind::Classic,
             LightTheme::Adwaita => ThemeKind::Adwaita,
             LightTheme::BreezeLight => ThemeKind::BreezeLight,
+            LightTheme::EvoraLight => ThemeKind::EvoraLight,
         }
     } else {
         match interface.dark_theme {
@@ -106,6 +107,7 @@ fn selected_theme(interface: &prefs::Interface, system: Option<egui::Theme>) -> 
             DarkTheme::SolarizedDark => ThemeKind::SolarizedDark,
             DarkTheme::AdwaitaDark => ThemeKind::AdwaitaDark,
             DarkTheme::BreezeDark => ThemeKind::BreezeDark,
+            DarkTheme::Evora => ThemeKind::Evora,
         }
     }
 }
@@ -126,7 +128,9 @@ pub(crate) fn cycle_appearance(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
 }
 
+// Evora build (patch E2): the Evora themes lead each list.
 const LIGHT_THEME_OPTIONS: &[(&str, ThemeKind)] = &[
+    ("evoraLight", ThemeKind::EvoraLight),
     ("studioLight", ThemeKind::StudioLight),
     ("proLightGray", ThemeKind::ProLightGray),
     ("proLight", ThemeKind::ProLight),
@@ -135,6 +139,7 @@ const LIGHT_THEME_OPTIONS: &[(&str, ThemeKind)] = &[
     ("breezeLight", ThemeKind::BreezeLight),
 ];
 const DARK_THEME_OPTIONS: &[(&str, ThemeKind)] = &[
+    ("evora", ThemeKind::Evora),
     ("proMedium", ThemeKind::ProMedium),
     ("pro", ThemeKind::Pro),
     ("studio", ThemeKind::Studio),

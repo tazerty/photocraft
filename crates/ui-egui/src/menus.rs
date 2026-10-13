@@ -89,6 +89,9 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.theme.adwaitaDark", "Adwaita Dark Theme", &["Window", "Theme"], None),
     ("window.theme.breezeLight", "Breeze Light Theme", &["Window", "Theme"], None),
     ("window.theme.breezeDark", "Breeze Dark Theme", &["Window", "Theme"], None),
+    // Evora build (patch E2).
+    ("window.theme.evora", "Evora Theme", &["Window", "Theme"], None),
+    ("window.theme.evoraLight", "Evora Light Theme", &["Window", "Theme"], None),
     ("window.theme.system", "Sync with system", &["Window", "Theme"], None),
     ("edit.search", "Search…", &["Edit"], Some("Cmd+F")),
     // Evora build (patch E1): the upstream Discord, website, GitHub and issue-tracker items are removed.

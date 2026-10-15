@@ -19,6 +19,14 @@
 // SMOKE_SCENARIO=pont-ehp (patch E4) : le moteur est chargé avec ?host=evora sous une coquille
 // minimale, le banc sert evora-host.json avec la seule page parente admise et exerce le protocole
 // hôte EHP v1 (evora/ci/smoke_ehp.mjs, qui décrit ce qu'il exige).
+//
+// SMOKE_SCENARIO=pont-muet (patch E4) : ?host=evora sous la page parente simple, avec
+// l'evora-host.json livré dans l'artefact (vide) : le moteur demande ce fichier, ne parle pas à la
+// page parente, ne démarre pas, n'écrit aucun stockage, et le dit (avertissement « admits no parent
+// origin »).
+//
+// SMOKE_SABOTAGE=banc|moteur (avec pont-ehp) ou muet (avec pont-muet) : témoin sabordé du banc ; le
+// passage sort en 0 seulement si le verdict exact du témoin est VALIDE (smoke_ehp.mjs, witness).
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -48,6 +56,13 @@ const EXPECT_FONTS = process.env.SMOKE_EXPECT_FONTS === '1';
 // E4 : scénario du pont hôte EHP v1.
 const SCENARIO = process.env.SMOKE_SCENARIO || 'hors-pont';
 const EHP = SCENARIO === ehp.SCENARIO;
+// E4 : pont muet (evora-host.json de l'artefact, vide).
+const MUET = SCENARIO === 'pont-muet';
+if (!['hors-pont', ehp.SCENARIO, 'pont-muet'].includes(SCENARIO)) throw new Error(`SMOKE_SCENARIO inconnu : ${SCENARIO}`);
+// Témoins sabordés : banc et moteur sur pont-ehp, muet sur pont-muet.
+const SABOTAGE = ehp.SABOTAGE;
+if (SABOTAGE && (SABOTAGE === 'muet') !== MUET) throw new Error(`témoin ${SABOTAGE} incompatible avec le scénario ${SCENARIO}`);
+if (SABOTAGE && !EHP && !MUET) throw new Error(`témoin ${SABOTAGE} sans scénario de pont`);
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -237,6 +252,8 @@ async function main() {
   const parentOrigin = `http://localhost:${parent.address().port}`;
   origins.parent = parentOrigin;
   if (EHP) state.hostConfig = ehp.hostConfig(parentOrigin);
+  // Témoin « muet » : le banc admet à tort la page parente (le pont doit alors parler, et le banc le voir).
+  if (MUET && SABOTAGE === 'muet') state.hostConfig = ehp.hostConfig(parentOrigin);
   state.policy = policyFor(parentOrigin);
   report.engineOrigin = engineOrigin;
   report.parentOrigin = parentOrigin;
@@ -284,6 +301,8 @@ async function main() {
             // E5 : restes d'autres comptes et de l'amont, et noms d'un autre moteur de la même
             // origine, posés avant le démarrage du moteur (evora:init doit purger les premiers).
             if (EHP) await c.send('Page.addScriptToEvaluateOnNewDocument', { source: ehp.SEED_JS }, frameSession);
+            // Témoin « moteur » : le moteur croit effacer (removeItem, clear, deleteDatabase sans effet).
+            if (EHP && SABOTAGE === 'moteur') await c.send('Page.addScriptToEvaluateOnNewDocument', { source: ehp.ENGINE_SABOTAGE_JS }, frameSession);
             await c.send('Runtime.runIfWaitingForDebugger', {}, frameSession);
           })().catch((e) => report.errors.push(`attache de l'iframe : ${e.message}`));
         } else if (p.waitingForDebugger) {
@@ -399,6 +418,17 @@ async function main() {
       report.parentMessages = JSON.parse(m.result.value);
     }
   }
+  if (MUET && frameSession) {
+    // Pont muet : rien n'a démarré ; stockage du document moteur et messages reçus par la page parente.
+    try {
+      const st = await c.send('Runtime.evaluate', { expression: STORAGE, returnByValue: true, awaitPromise: true }, frameSession);
+      report.storage = JSON.parse(st.result.value);
+      const m = await c.send('Runtime.evaluate', { expression: 'JSON.stringify(window.__parentMessages || null)', returnByValue: true }, page);
+      report.parentMessages = JSON.parse(m.result.value);
+    } catch (e) {
+      report.errors.push(`pont muet : relevé impossible : ${e.message}`);
+    }
+  }
   if (bench) {
     try { await bench.refresh(); } catch { /* journal déjà relevé */ }
     report.ehp = { ids: bench.ids, exchanges: bench.summary(), storage: bench.storageLog, problems: bench.verify() };
@@ -416,7 +446,11 @@ async function main() {
 
   const problems = [...report.errors, ...(report.ehp ? report.ehp.problems : [])];
   if (!frameSession) problems.push("aucune iframe hors processus attachée : l'origine du moteur n'est pas distincte");
-  if (!readyAt) problems.push(`le moteur n'a pas démarré en ${TIMEOUT_MS} ms : ${JSON.stringify(last)}`);
+  if (!readyAt && !MUET) problems.push(`le moteur n'a pas démarré en ${TIMEOUT_MS} ms : ${JSON.stringify(last)}`);
+  if (MUET) {
+    problems.push(...ehp.muteProblems({ started: Boolean(readyAt), last, storage: report.storage, parentMessages: report.parentMessages,
+      served: report.served, warnings: report.warnings }));
+  }
   if (last && last.origin !== engineOrigin) problems.push(`origine du document moteur inattendue : ${last && last.origin}`);
   if (last && last.parent !== parentOrigin) problems.push(`origine parente inattendue : ${last && last.parent}`);
   const stray404 = state.notFound.filter((p) => !ALLOWED_404.includes(p));
@@ -438,7 +472,7 @@ async function main() {
       problems.push(`hors pont : l'ancien message de purge (sans pont) a encore effacé le stockage : ${JSON.stringify(after)}`);
     }
   }
-  if (!bench && report.parentMessages && report.parentMessages.length) {
+  if (!bench && !MUET && report.parentMessages && report.parentMessages.length) {
     problems.push(`hors pont : le moteur a écrit à la page parente : ${JSON.stringify(report.parentMessages).slice(0, 300)}`);
   }
   if (EXPECT_FONTS) {
@@ -448,6 +482,17 @@ async function main() {
   }
   report.problems = problems;
   report.ok = problems.length === 0;
+  // Témoin sabordé : VALIDE (code 0) seulement si chaque rouge attendu est vu, à sa place, crédité à
+  // son sabotage, et si rien d'autre ne rougit (smoke_ehp.mjs, witness).
+  if (SABOTAGE) {
+    const w = ehp.witness({ mode: SABOTAGE, problems, sabotaged: bench ? bench.sabotaged : [], checks: bench ? bench.checks : [],
+      started: Boolean(readyAt) });
+    report.witness = w;
+    report.ok = w.ok;
+    problems.push(w.ok
+      ? `TÉMOIN SABORDÉ « ${SABOTAGE} » VALIDE : ${w.seen.length} détecteur(s) rougi(s), chacun à sa place et seuls (${w.seen.join(', ')}) : le banc sait rougir`
+      : `TÉMOIN SABORDÉ « ${SABOTAGE} » INVALIDE : ${w.reasons.join(' ; ')}`);
+  }
   if (!report.ok && stderr) report.chromeStderr = stderr.split('\n').slice(-40);
   fs.writeFileSync(reportFile, JSON.stringify(report, null, 1));
 
@@ -472,7 +517,8 @@ async function main() {
     `| Erreurs de page | ${report.errors.length} |`,
     `| Exceptions admises (404 fonts/manifest.txt) | ${report.allowed.length} |`,
     `| Avertissements de console | ${report.warnings.length} |`,
-    `| Verdict | ${report.ok ? 'vert' : 'ROUGE'} |`, '',
+    ...(report.witness ? [`| Témoin sabordé « ${report.witness.mode} » | ${report.witness.seen.length} rouge(s) vu(s) sur ${report.witness.expected.length} attendu(s), ${report.witness.sabotaged.length} sabotage(s) du banc joué(s) |`] : []),
+    `| Verdict | ${report.witness ? (report.ok ? 'témoin VALIDE (rouge attendu, exact)' : 'témoin INVALIDE') : (report.ok ? 'vert' : 'ROUGE')} |`, '',
     ...problems.map((p) => `- ${p}`), '',
   ];
   const text = lines.join('\n');
@@ -482,6 +528,10 @@ async function main() {
   for (const [k, v] of Object.entries(report.served)) console.log(`servi : ${k} ×${v}`);
   if (report.ehp) for (const m of report.ehp.exchanges) console.log(`ehp : ${m}`);
   if (report.ehp) for (const st of report.ehp.storage) console.log(`ehp stockage : ${JSON.stringify(st)}`);
+  if (report.witness) {
+    for (const x of report.witness.sabotaged) console.log(`témoin, sabotage joué : ${x}`);
+    for (const ck of (bench ? bench.checks : [])) console.log(`témoin, contrôle ${ck.label} : ${ck.tags.join(', ') || 'vert'}`);
+  }
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text + '\n');
   process.exit(report.ok ? 0 : 1);
 }

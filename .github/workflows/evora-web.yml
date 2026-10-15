@@ -11,7 +11,10 @@
 # doublons en avertissement), cargo-about (LICENSES/THIRD-PARTY-RUST.html), marques ArtCraft,
 # fichiers d'hébergement, LICENSES/ complet, émojis des catalogues affichés (résolus dans la pile de
 # polices d'egui), précompression .br/.gz et empreintes CSP, test de fumée Chrome sans interface en
-# origine différente (evora/ci/), hors pont puis avec le pont hôte EHP v1 (E4, scénario « pont-ehp »).
+# origine différente (evora/ci/), hors pont puis avec le pont hôte EHP v1 (E4, scénario « pont-ehp »)
+# et le pont muet (evora-host.json de l'artefact, vide), puis les témoins sabordés de ce banc : chacun
+# n'est VALIDE que si ses rouges sont exactement ceux attendus, chacun à sa place (autotest du verdict
+# sans navigateur, témoins « banc », « moteur » et « muet »).
 # Chaque porte s'exécute même si une autre échoue ; le bilan échoue s'il en manque une, et l'artefact
 # n'est publié qu'après un bilan vert.
 #
@@ -389,8 +392,35 @@ jobs:
             SMOKE_BROWSER_LANG= SMOKE_EXPECT_FONTS= SMOKE_URL_STORAGE_NS= SMOKE_OLD_PURGE= \
             node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-ehp.json" "$EVORA_FONTS_DIR"
           pont=$?
-          echo "Test de fumée : hors pont $hors_pont, pont EHP $pont (0 = vert)"
-          [ "$hors_pont" -eq 0 ] && [ "$pont" -eq 0 ]
+          # E4 : pont muet. ?host=evora avec l'evora-host.json livré (vide) : aucun message à la page
+          # parente, aucun démarrage, aucun stockage, et l'avertissement attendu.
+          SMOKE_SCENARIO=pont-muet SMOKE_TIMEOUT_MS=15000 SMOKE_QUERY="host=evora&webgl" SMOKE_EXPECT_LANG= SMOKE_EXPECT_THEME= \
+            SMOKE_BROWSER_LANG= SMOKE_EXPECT_FONTS= SMOKE_URL_STORAGE_NS= SMOKE_OLD_PURGE= \
+            node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-muet.json" "$EVORA_FONTS_DIR"
+          muet=$?
+          # Le banc sait-il rougir ? D'abord le verdict des témoins, éprouvé sans navigateur (chaque
+          # façon de mentir doit rendre INVALIDE), puis trois témoins sabordés, VALIDES seulement si
+          # leurs rouges sont exactement ceux attendus, chacun à sa place, et rien d'autre :
+          # « banc » (le banc fabrique dix-sept défauts, messages du moteur et stockage), « moteur »
+          # (removeItem, clear et deleteDatabase sans effet : le moteur croit purger), « muet » (le
+          # banc admet à tort la page parente).
+          node evora/ci/witness_selftest.mjs
+          autotest=$?
+          SMOKE_SCENARIO=pont-ehp SMOKE_SABOTAGE=banc SMOKE_QUERY="host=evora&webgl" SMOKE_EXPECT_LANG= SMOKE_EXPECT_THEME= \
+            SMOKE_BROWSER_LANG= SMOKE_EXPECT_FONTS= SMOKE_URL_STORAGE_NS= SMOKE_OLD_PURGE= \
+            node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-temoin-banc.json" "$EVORA_FONTS_DIR"
+          temoin_banc=$?
+          SMOKE_SCENARIO=pont-ehp SMOKE_SABOTAGE=moteur SMOKE_QUERY="host=evora&webgl" SMOKE_EXPECT_LANG= SMOKE_EXPECT_THEME= \
+            SMOKE_BROWSER_LANG= SMOKE_EXPECT_FONTS= SMOKE_URL_STORAGE_NS= SMOKE_OLD_PURGE= \
+            node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-temoin-moteur.json" "$EVORA_FONTS_DIR"
+          temoin_moteur=$?
+          SMOKE_SCENARIO=pont-muet SMOKE_SABOTAGE=muet SMOKE_TIMEOUT_MS=15000 SMOKE_QUERY="host=evora&webgl" SMOKE_EXPECT_LANG= SMOKE_EXPECT_THEME= \
+            SMOKE_BROWSER_LANG= SMOKE_EXPECT_FONTS= SMOKE_URL_STORAGE_NS= SMOKE_OLD_PURGE= \
+            node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-temoin-muet.json" "$EVORA_FONTS_DIR"
+          temoin_muet=$?
+          echo "Test de fumée : hors pont $hors_pont, pont EHP $pont, pont muet $muet ; autotest des témoins $autotest, témoins banc $temoin_banc, moteur $temoin_moteur, muet $temoin_muet (0 = vert ou témoin VALIDE)"
+          [ "$hors_pont" -eq 0 ] && [ "$pont" -eq 0 ] && [ "$muet" -eq 0 ] && [ "$autotest" -eq 0 ] \
+            && [ "$temoin_banc" -eq 0 ] && [ "$temoin_moteur" -eq 0 ] && [ "$temoin_muet" -eq 0 ]
 
       - name: Bilan des portes
         env:

@@ -27,6 +27,20 @@
 //   - aucune enveloppe hors norme (champ inconnu, version, type, ids, charge utile) et aucun
 //     evora:failed ; chaque capacité annoncée est exercée par ce scénario.
 // Chaque contrôle porte une étiquette [ehp:…] dans la liste des problèmes du rapport.
+//
+// Témoins sabordés (SMOKE_SABOTAGE) : le même banc, sur un défaut fabriqué ; un témoin est VALIDE
+// (code 0) seulement si chaque défaut rougit à SON détecteur, à SA place, et si tout le reste du banc
+// reste vert (verdict exact, function witness) :
+//   - « banc » : le banc fait parler le document moteur à tort (messages postés au parent depuis la
+//     fenêtre du moteur, par le protocole DevTools : la page parente ne peut pas les distinguer du
+//     moteur) et touche son stockage juste avant un contrôle, puis le remet en état. Inventaire
+//     constant (BANC_SABOTAGES) : un sabotage non joué, ou crédité par le rouge d'un autre, invalide
+//     le témoin ;
+//   - « moteur » : le document moteur reçoit, avant son démarrage, un removeItem, un clear et un
+//     deleteDatabase qui réussissent sans rien effacer (le moteur croit purger) : seuls les
+//     détecteurs de MOTEUR_REDS doivent rougir, chacun à son contrôle ;
+//   - « muet » (scénario pont-muet de smoke.mjs) : le banc admet à tort la page parente dans
+//     evora-host.json : seuls MUET_REDS doivent rougir.
 import zlib from 'node:zlib';
 
 export const SCENARIO = 'pont-ehp';
@@ -52,6 +66,131 @@ const ACK_CODES = ['clean', 'cancelled', 'conflict', 'too_large', 'quota', 'forb
   'unsupported', 'rate_limited', 'read_only', 'busy', 'capability', 'network', 'server', 'timeout'];
 const FAIL_CODES = ['no_webgl2', 'wasm', 'memory', 'panic', 'unsupported_browser', 'protocol', 'init'];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Témoin sabordé joué par ce passage ('' : aucun, le banc normal).
+export const SABOTAGE = process.env.SMOKE_SABOTAGE || '';
+if (!['', 'banc', 'moteur', 'muet'].includes(SABOTAGE)) throw new Error(`SMOKE_SABOTAGE inconnu : ${SABOTAGE}`);
+// Témoin « banc » : chaque sabotage, le seul détecteur qui doit rougir et, quand ce détecteur est un
+// contrôle du stockage, le contrôle (checkpoint) où il doit rougir. Un sabotage « message » est
+// crédité seulement par un rouge qui cite l'id du message fabriqué.
+export const BANC_SABOTAGES = [
+  { tag: 'ehp:ready-count', kind: 'message' },
+  { tag: 'ehp:answer-v2', kind: 'message' },
+  { tag: 'ehp:answer-envelope', kind: 'message' },
+  { tag: 'ehp:answer-foreign', kind: 'message' },
+  { tag: 'ehp:answer-source', kind: 'message' },
+  { tag: 'ehp:envelope', kind: 'message' },
+  { tag: 'ehp:save-shape', kind: 'message' },
+  { tag: 'ehp:purge-early-ack', kind: 'message', at: 'purge-bloquée:accusé' },
+  { tag: 'ehp:namespace', kind: 'stockage', at: 'init:espace' },
+  { tag: 'ehp:foreign-names', kind: 'stockage', at: 'init:autre-moteur' },
+  { tag: 'ehp:purge-witness', kind: 'stockage', at: 'témoins:effacement' },
+  { tag: 'ehp:purge-order', kind: 'stockage', at: 'purge-bloquée:clés' },
+  { tag: 'ehp:purge-left', kind: 'stockage', at: 'après-accusé:restes' },
+  { tag: 'ehp:purge-rewrite', kind: 'stockage', at: 'après-écriture:réécriture' },
+  { tag: 'ehp:session-storage', kind: 'stockage', at: 'après-écriture:session' },
+  { tag: 'ehp:caches', kind: 'stockage', at: 'après-écriture:caches' },
+  { tag: 'ehp:opfs', kind: 'stockage', at: 'après-écriture:opfs' },
+];
+// Témoin « moteur » (removeItem, clear et deleteDatabase sans effet) : les rouges attendus, chacun à
+// son contrôle. Les restes non effacés font aussi rougir les témoins de purge et la réécriture : ce
+// débordement est déterministe et fait partie de l'attendu.
+export const MOTEUR_REDS = [
+  { tag: 'ehp:namespace', at: 'init:espace' },
+  { tag: 'ehp:purge-witness', at: 'témoins:effacement' },
+  { tag: 'ehp:purge-early-ack', at: 'purge-bloquée:accusé' },
+  { tag: 'ehp:purge-order', at: 'purge-bloquée:clés' },
+  { tag: 'ehp:purge-left', at: 'après-accusé:restes' },
+  { tag: 'ehp:purge-rewrite', at: 'après-écriture:réécriture' },
+];
+// Témoin « muet » (scénario pont-muet, parent admis à tort) : le moteur s'annonce et ne se tait plus
+// pour la raison attendue ; il ne démarre toujours pas (il attend evora:init) et n'écrit rien.
+export const MUET_REDS = [{ tag: 'muet:message' }, { tag: 'muet:raison' }];
+
+// L'étiquette d'un problème du rapport ([ehp:…] ou [muet:…]), ou null.
+export function tagOf(problem) {
+  const m = /^\[((?:ehp|muet):[^\]]+)\]/.exec(String(problem));
+  return m ? m[1] : null;
+}
+
+// Verdict exact d'un témoin sabordé : chaque rouge attendu est vu, à sa place et crédité à son
+// sabotage ; aucun autre rouge (étiqueté ou non) ; aucun contrôle non visé n'a rougi.
+export function witness({ mode, problems, sabotaged = [], checks = [], started }) {
+  const inventory = { banc: BANC_SABOTAGES, moteur: MOTEUR_REDS, muet: MUET_REDS }[mode];
+  if (!inventory) throw new Error(`témoin inconnu : ${mode}`);
+  const list = problems.map(String);
+  const untagged = list.filter((p) => !tagOf(p));
+  const seen = [...new Set(list.map(tagOf).filter(Boolean))].sort();
+  const expected = [...new Set(inventory.map((s) => s.tag))].sort();
+  const missing = expected.filter((t) => !seen.includes(t));
+  const unexpected = seen.filter((t) => !expected.includes(t));
+  const targeted = new Set(inventory.filter((s) => s.at).map((s) => s.at));
+  const uncredited = [];
+  for (const s of inventory) {
+    const why = [];
+    if (s.at) {
+      const at = checks.filter((c) => c.label === s.at);
+      if (at.length !== 1) why.push(`contrôle ${s.at} exécuté ${at.length} fois`);
+      else if (at[0].tags.length !== 1 || at[0].tags[0] !== s.tag) why.push(`contrôle ${s.at} : ${at[0].tags.join(', ') || 'vert'}`);
+    }
+    if (mode === 'banc') {
+      const done = sabotaged.filter((e) => e.tag === s.tag);
+      if (done.length !== 1) why.push(`sabotage joué ${done.length} fois`);
+      else if (s.kind === 'message' && !list.some((p) => tagOf(p) === s.tag && done[0].id && p.includes(done[0].id))) {
+        why.push(`aucun rouge ${s.tag} ne cite le message fabriqué ${done[0].id}`);
+      }
+    }
+    if (why.length) uncredited.push(`${s.tag} (${why.join(' ; ')})`);
+  }
+  const strays = mode === 'banc' ? sabotaged.filter((e) => !inventory.some((s) => s.tag === e.tag)) : sabotaged;
+  if (strays.length) uncredited.push(`sabotages hors inventaire : ${strays.map((e) => e.tag).join(', ')}`);
+  const spilled = checks.filter((c) => !targeted.has(c.label) && c.tags.length).map((c) => `${c.label} : ${c.tags.join(', ')}`);
+  const reasons = [
+    ...(mode !== 'muet' && !started ? ['moteur non démarré'] : []),
+    ...(untagged.length ? [`problèmes hors banc : ${untagged.join(' | ').slice(0, 400)}`] : []),
+    ...(missing.length ? [`détecteurs restés verts : ${missing.join(', ')}`] : []),
+    ...(unexpected.length ? [`détecteurs rougis hors attente : ${unexpected.join(', ')}`] : []),
+    ...(uncredited.length ? [`rouges non crédités : ${uncredited.join(', ')}`] : []),
+    ...(spilled.length ? [`contrôles non visés rougis : ${spilled.join(', ')}`] : []),
+  ];
+  return { mode, ok: reasons.length === 0, expected, seen, missing, unexpected, uncredited, spilled, untagged, reasons,
+    sabotaged: sabotaged.map((e) => `${e.tag} : ${e.what}`) };
+}
+
+// Témoin « moteur », posé dans le document moteur avant son démarrage : le moteur croit effacer.
+// removeItem et clear ne font rien ; deleteDatabase rend une demande qui réussit au tour suivant sans
+// rien supprimer (le banc lui-même n'efface jamais rien : il ne lit, n'écrit et n'ouvre).
+export const ENGINE_SABOTAGE_JS = `(() => {
+  if (window.__evoraEngineSabotaged) return;
+  window.__evoraEngineSabotaged = true;
+  Storage.prototype.removeItem = function () {};
+  Storage.prototype.clear = function () {};
+  IDBFactory.prototype.deleteDatabase = function () {
+    const req = { result: undefined, error: null, readyState: 'pending', onsuccess: null, onerror: null, onblocked: null, onupgradeneeded: null };
+    setTimeout(() => {
+      req.readyState = 'done';
+      if (typeof req.onsuccess === 'function') req.onsuccess(new Event('success'));
+    }, 0);
+    return req;
+  };
+})();`;
+
+// Scénario pont-muet (smoke.mjs) : ?host=evora avec l'evora-host.json de l'artefact, livré vide.
+// Le pont doit rester muet, pour cette raison, sans démarrer ni écrire.
+export function muteProblems({ started, last, storage, parentMessages, served, warnings }) {
+  const out = [];
+  if (!Object.keys(served || {}).some((k) => k.startsWith('/evora-host.json '))) {
+    out.push("[muet:config] evora-host.json jamais demandé par le moteur : le pont n'a pas été mis à l'épreuve");
+  }
+  if (!Array.isArray(parentMessages)) out.push('[muet:message] journal des messages de la page parente illisible');
+  else if (parentMessages.length) out.push(`[muet:message] le moteur a écrit à la page parente sans parent admis : ${JSON.stringify(parentMessages).slice(0, 300)}`);
+  if (started || !last || last.loading === null) out.push(`[muet:demarrage] le moteur a démarré sans parent admis : ${JSON.stringify(last)}`);
+  if (!storage) out.push('[muet:stockage] stockage du document moteur non relevé');
+  else if (storage.keys.length || (storage.dbs || []).length) out.push(`[muet:stockage] stockage écrit sans parent admis : ${JSON.stringify(storage)}`);
+  if (!(warnings || []).some((w) => w.includes('admits no parent origin'))) {
+    out.push("[muet:raison] avertissement « evora-host.json admits no parent origin » absent : le moteur ne s'est pas tu pour la raison attendue");
+  }
+  return out;
+}
 
 // Une image PNG RGBA de 32 × 32 (indigo), écrite ici : aucun fichier binaire dans le dépôt.
 function png() {
@@ -240,6 +379,11 @@ export class EhpBench {
     this.state = { log: [], sent: [] };
     this.readyCaps = [];
     this.storageLog = [];
+    // Témoins sabordés : sabotages joués (banc), ids des messages fabriqués, et chaque contrôle nommé
+    // du stockage avec les étiquettes qu'il a fait rougir.
+    this.sabotaged = [];
+    this.injectedIds = [];
+    this.checks = [];
   }
 
   fail(tag, text) {
@@ -297,6 +441,46 @@ export class EhpBench {
     return this.evaluate(this.page, `__ehp.witness(${JSON.stringify(which)}, ${JSON.stringify(type)}, ${JSON.stringify(payload)}, ${JSON.stringify(re || null)})`);
   }
 
+  // Témoin « banc » : le sabotage `tag` de l'inventaire. Un sabotage « message » poste au parent,
+  // depuis la fenêtre du moteur, le message littéral `script` (sans id : un ULID neuf lui est donné) ;
+  // un sabotage « stockage » exécute `script` dans le document moteur juste avant son contrôle.
+  async sabotage(tag, what, script) {
+    if (SABOTAGE !== 'banc') return;
+    const spec = BANC_SABOTAGES.find((s) => s.tag === `ehp:${tag}`);
+    if (!spec) throw new Error(`sabotage hors inventaire : ${tag}`);
+    let id = null;
+    if (spec.kind === 'message') {
+      id = await this.evaluate(this.frame(), `(() => {
+        const A = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+        let t = Date.now(), id = '';
+        for (let i = 0; i < 10; i++) { id = A[t % 32] + id; t = Math.floor(t / 32); }
+        for (const b of crypto.getRandomValues(new Uint8Array(16))) id += A[b % 32];
+        const m = ${script};
+        m.id = id;
+        parent.postMessage(m, ${JSON.stringify(this.parentOrigin)});
+        return id;
+      })()`);
+      this.injectedIds.push(id);
+    } else {
+      await this.evaluate(this.frame(), script);
+    }
+    this.sabotaged.push({ tag: spec.tag, kind: spec.kind, at: spec.at || null, what, id });
+    this.log(`[ehp] sabordage ${spec.tag}${id ? ` (message ${id})` : ''} : ${what}`);
+  }
+
+  // Témoin « banc » : remise en état du stockage après le contrôle visé (aucun débordement).
+  async restore(script) {
+    if (SABOTAGE !== 'banc') return;
+    await this.evaluate(this.frame(), script);
+  }
+
+  // Un contrôle nommé du stockage : les étiquettes qu'il a fait rougir, pour l'attribution des témoins.
+  async checkpoint(label, fn) {
+    const before = this.problems.length;
+    await fn();
+    this.checks.push({ label, tags: [...new Set(this.problems.slice(before).map(tagOf).filter(Boolean))] });
+  }
+
   response(type, re) {
     return (m) => m.type === type && m.re === re;
   }
@@ -329,6 +513,11 @@ export class EhpBench {
       if (!confirmed.includes(this.ids[w])) this.fail('witness', `le témoin ${w} n'a pas confirmé son envoi : banc inopérant`);
     }
     await sleep(1500);
+    await this.sabotage('ready-count', 'second evora:ready', `{ v: 1, type: 'evora:ready', payload: ${JSON.stringify(ready.msg.payload)} }`);
+    await this.sabotage('answer-v2', 'réponse au evora:init de version 2', `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(this.ids.v2)}, payload: { ok: true } }`);
+    await this.sabotage('answer-envelope', 'réponse au evora:init à champ en trop', `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(this.ids.extraField)}, payload: { ok: true } }`);
+    await this.sabotage('answer-foreign', 'réponse au témoin d\'origine non admise', `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(this.ids.foreign)}, payload: { ok: true } }`);
+    await this.sabotage('answer-source', 'réponse au témoin de même origine, autre fenêtre', `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(this.ids.sibling)}, payload: { ok: true } }`);
     this.ids.init = await this.send('evora:init', init, { re: this.ids.ready });
     const ack = await this.waitEngine(this.response('evora:ack', this.ids.init), 120000);
     if (!ack || !ack.msg.payload || ack.msg.payload.ok !== true) {
@@ -360,6 +549,8 @@ export class EhpBench {
     }
     const clean = await this.waitEngine((m) => m.type === 'evora:dirty' && m.payload.docRef === DOC_REF && m.payload.dirty === false, 10000);
     if (!clean) this.fail('dirty', 'evora:dirty {dirty: false} absent après l\'ouverture');
+    await this.sabotage('envelope', 'evora:dirty à champ d\'enveloppe en trop', `{ v: 1, type: 'evora:dirty', payload: { dirty: false, docRef: ${JSON.stringify(DOC_REF)} }, extra: true }`);
+    await this.sabotage('save-shape', 'evora:save aux octets en vue typée', `{ v: 1, type: 'evora:save', payload: { docRef: ${JSON.stringify(DOC_REF)}, name: 'evora-smoke.pcraft', saveAs: false, bytes: new Uint8Array(4) } }`);
     const dirty = await this.press('a', (m) => m.type === 'evora:dirty' && m.payload.docRef === DOC_REF && m.payload.dirty === true, 'evora:dirty true');
     if (!dirty) {
       this.fail('dirty', 'evora:dirty {dirty: true} absent après une modification (Ctrl+A)');
@@ -382,9 +573,9 @@ export class EhpBench {
     if (!cleanAck || cleanAck.msg.payload.ok !== true || cleanAck.msg.payload.code !== 'clean') {
       this.fail('clean', `evora:request-save sur un document enregistré : attendu evora:ack {ok: true, code: "clean"}, reçu ${JSON.stringify(cleanAck && cleanAck.msg)}`);
     }
-    const savesBefore = this.engineMessages().filter((e) => e.msg.type === 'evora:save').length;
-    const action = await this.press('s', (m) => m.type === 'evora:save' && !m.re
-      && this.engineMessages().filter((e) => e.msg.type === 'evora:save').length > savesBefore, 'evora:save (Ctrl+S)');
+    // Un evora:save arrivé APRÈS le raccourci : jamais un enregistrement antérieur sans re.
+    const savesBefore = new Set(this.engineMessages().filter((e) => e.msg.type === 'evora:save').map((e) => e.msg.id));
+    const action = await this.press('s', (m) => m.type === 'evora:save' && !m.re && !savesBefore.has(m.id), 'evora:save (Ctrl+S)');
     if (!action) this.fail('save-action', 'aucun evora:save après Ctrl+S (Fichier › Enregistrer)');
     else if ((action.msg.payload || {}).docRef !== DOC_REF || !((action.msg.payload.bytes || {}).$arrayBuffer > 0)) {
       this.fail('save-action', `evora:save de Ctrl+S inattendu : ${JSON.stringify(action.msg.payload)}`);
@@ -418,40 +609,64 @@ export class EhpBench {
   }
 
   // E5 corrigé : espace de noms, purge à l'init, témoins de purge, purge réelle, plus d'écriture.
-  async storagePhases(session) {
+  // Chaque contrôle est nommé (checkpoint) : un témoin sabordé y vérifie que chaque défaut rougit à
+  // sa place et seulement là. Les sabotages du témoin « banc » sont posés juste avant leur contrôle
+  // et retirés juste après (restore), pour ne déborder sur aucun autre.
+  async storagePhases(sessionState) {
     const mine = { keys: [`${STORAGE_NS}:${PREFS}`], dbs: [`${STORAGE_NS}:${PRESETS}`] };
     const names = (st) => ({ keys: EhpBench.engineNames(st.keys, PREFS), dbs: EhpBench.engineNames(st.dbs, PRESETS) });
     const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+    const nsKey = `${STORAGE_NS}:${PREFS}`;
     const foreignKept = (st, phase) => {
       if (!st.keys.includes(FOREIGN_KEY) || (st.dbs && !st.dbs.includes(FOREIGN_DB))) {
         this.fail('foreign-names', `${phase} : les noms d'un autre moteur de la même origine ont été effacés : ${JSON.stringify({ keys: st.keys, dbs: st.dbs })}`);
       }
     };
-    const untouched = (st, phase) => {
-      if (Array.isArray(st.opfs) && st.opfs.length) this.fail('opfs', `${phase} : OPFS non vide : ${st.opfs.join(', ')}`);
-      if (Array.isArray(st.caches) && st.caches.length) this.fail('caches', `${phase} : Cache Storage non vide : ${st.caches.join(', ')}`);
-      if (Array.isArray(st.session) && st.session.length) this.fail('session-storage', `${phase} : sessionStorage non vide : ${st.session.join(', ')}`);
+    const untouched = async (st, phase, label) => {
+      await this.checkpoint(`${label}:opfs`, () => {
+        if (Array.isArray(st.opfs) && st.opfs.length) this.fail('opfs', `${phase} : OPFS non vide : ${st.opfs.join(', ')}`);
+      });
+      await this.checkpoint(`${label}:caches`, () => {
+        if (Array.isArray(st.caches) && st.caches.length) this.fail('caches', `${phase} : Cache Storage non vide : ${st.caches.join(', ')}`);
+      });
+      await this.checkpoint(`${label}:session`, () => {
+        if (Array.isArray(st.session) && st.session.length) this.fail('session-storage', `${phase} : sessionStorage non vide : ${st.session.join(', ')}`);
+      });
     };
-    // 1. Après l'init et la séance : tout sous l'espace de noms ; autres comptes et noms nus purgés.
-    const n1 = names(session);
-    if (!same(n1.keys, mine.keys) || (session.dbs && !same(n1.dbs, mine.dbs))) {
-      this.fail('namespace', `stockage du moteur hors de l'espace de noms ou restes non purgés à l'init : ${JSON.stringify(n1)}, attendu ${JSON.stringify(mine)}`);
-    }
-    if (session.dbs === null) this.fail('bench', 'indexedDB.databases() indisponible : bases non vérifiables');
-    foreignKept(session, 'après l\'init');
-    untouched(session, 'après l\'init');
+    // 1. Après l'init et la séance : tout sous l'espace de noms ; autres comptes et noms nus purgés ;
+    //    noms d'un autre moteur de la même origine conservés.
+    await this.sabotage('namespace', 'nom nu de l\'amont réécrit après l\'init', `localStorage.setItem('${PREFS}', '{}'); true`);
+    await this.sabotage('foreign-names', 'nom d\'un autre moteur de la même origine effacé', `localStorage.removeItem('${FOREIGN_KEY}'); true`);
+    const session = SABOTAGE === 'banc' ? await this.storage() : sessionState;
+    await this.checkpoint('init:espace', () => {
+      const n1 = names(session);
+      if (!same(n1.keys, mine.keys) || (session.dbs && !same(n1.dbs, mine.dbs))) {
+        this.fail('namespace', `stockage du moteur hors de l'espace de noms ou restes non purgés à l'init : ${JSON.stringify(n1)}, attendu ${JSON.stringify(mine)}`);
+      }
+    });
+    await this.checkpoint('init:banc', () => {
+      if (session.dbs === null) this.fail('bench', 'indexedDB.databases() indisponible : bases non vérifiables');
+    });
+    await this.checkpoint('init:autre-moteur', () => foreignKept(session, 'après l\'init'));
+    await untouched(session, 'après l\'init', 'init');
+    await this.restore(`localStorage.removeItem('${PREFS}'); localStorage.setItem('${FOREIGN_KEY}', 'garde'); true`);
     // 2. Témoins de purge : version 2, champ d'enveloppe en trop, origine non admise, autre fenêtre.
     this.ids.purgeV2 = await this.send('evora:purge', `{ scope: 'all' }`, { v: 2 });
     this.ids.purgeExtraField = await this.send('evora:purge', `{ scope: 'all' }`, { extraField: true });
     this.ids.purgeForeign = await this.witness('foreign', 'evora:purge', { scope: 'all' });
     this.ids.purgeSibling = await this.witness('sibling', 'evora:purge', { scope: 'all' });
     await sleep(2500);
+    await this.sabotage('purge-witness', 'clé du compte effacée comme par un témoin de purge accepté',
+      `window.__evoraSaved = localStorage.getItem('${nsKey}'); localStorage.removeItem('${nsKey}'); true`);
     const witness = await this.storage();
     this.storageLog.push({ phase: 'témoins de purge', ...witness });
-    const n2 = names(witness);
-    if (!same(n2.keys, mine.keys) || (witness.dbs && !same(n2.dbs, mine.dbs))) {
-      this.fail('purge-witness', `un message de purge invalide a effacé le stockage : ${JSON.stringify(n2)}`);
-    }
+    await this.checkpoint('témoins:effacement', () => {
+      const n2 = names(witness);
+      if (!same(n2.keys, mine.keys) || (witness.dbs && !same(n2.dbs, mine.dbs))) {
+        this.fail('purge-witness', `un message de purge invalide a effacé le stockage : ${JSON.stringify(n2)}`);
+      }
+    });
+    await this.restore(`if (typeof window.__evoraSaved === 'string') localStorage.setItem('${nsKey}', window.__evoraSaved); true`);
     // 3. Restes hors espace de noms reposés juste avant la purge, et une connexion qui bloque la
     //    suppression de la base du compte (comme un autre onglet).
     const blocker = await this.evaluate(this.frame(), `(async () => {
@@ -460,35 +675,63 @@ export class EhpBench {
       window.__evoraBlocker = await new Promise((r) => { const q = indexedDB.open('${STORAGE_NS}:${PRESETS}'); q.onsuccess = () => r(q.result); q.onerror = () => r(null); });
       return window.__evoraBlocker !== null;
     })()`);
-    if (!blocker) this.fail('bench', 'connexion de blocage non ouverte : ordre accusé/suppression non vérifiable');
-    // 4. La vraie purge : pas d'accusé tant que la base n'est pas supprimée.
+    await this.checkpoint('blocage:banc', () => {
+      if (!blocker) this.fail('bench', 'connexion de blocage non ouverte : ordre accusé/suppression non vérifiable');
+    });
+    // 4. La vraie purge : clés effacées d'abord, pas d'accusé tant que la base n'est pas supprimée.
     this.ids.purge = await this.send('evora:purge', `{ scope: 'current' }`);
-    await sleep(2500);
+    await sleep(500);
+    await this.sabotage('purge-early-ack', 'accusé de purge avant la suppression de la base',
+      `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(this.ids.purge)}, payload: { ok: true } }`);
+    await this.sabotage('purge-order', 'clé du compte réécrite pendant la suppression bloquée', `localStorage.setItem('${nsKey}', '{}'); true`);
+    await sleep(2000);
     await this.refresh();
     const early = this.engineMessages().find((e) => e.msg.re === this.ids.purge);
     const blocked = await this.storage();
     this.storageLog.push({ phase: 'purge bloquée', ...blocked });
-    if (early) this.fail('purge-early-ack', `evora:purge accusé alors que la suppression de la base est encore bloquée : ${JSON.stringify(early.msg)}`);
-    if (names(blocked).keys.length) this.fail('purge-order', `clés du moteur encore présentes pendant la suppression de la base : ${names(blocked).keys.join(', ')}`);
+    await this.checkpoint('purge-bloquée:accusé', () => {
+      if (early) this.fail('purge-early-ack', `evora:purge accusé alors que la suppression de la base est encore bloquée : ${JSON.stringify(early.msg)}`);
+    });
+    await this.checkpoint('purge-bloquée:clés', () => {
+      if (names(blocked).keys.length) this.fail('purge-order', `clés du moteur encore présentes pendant la suppression de la base : ${names(blocked).keys.join(', ')}`);
+    });
+    await this.restore(`localStorage.removeItem('${nsKey}'); true`);
     await this.evaluate(this.frame(), 'window.__evoraBlocker && window.__evoraBlocker.close(); true');
-    const ack = await this.waitEngine(this.response('evora:ack', this.ids.purge), 20000);
+    // L'accusé du moteur, jamais celui que le témoin « banc » a fabriqué.
+    const ack = await this.waitEngine((m) => m.type === 'evora:ack' && m.re === this.ids.purge && !this.injectedIds.includes(m.id), 20000);
+    await this.sabotage('purge-left', 'clé du compte réécrite juste après l\'accusé de purge', `localStorage.setItem('${nsKey}', '{}'); true`);
     const after = await this.storage();
     this.storageLog.push({ phase: 'après l\'accusé de purge', ...after });
-    if (!ack || ack.msg.payload.ok !== true) this.fail('purge', `accusé de evora:purge absent ou négatif : ${JSON.stringify(ack && ack.msg)}`);
-    const n4 = names(after);
-    if (n4.keys.length || (after.dbs && n4.dbs.length)) this.fail('purge-left', `stockage du moteur encore présent juste après l'accusé de purge : ${JSON.stringify(n4)}`);
-    foreignKept(after, 'après la purge');
-    untouched(after, 'après la purge');
+    await this.checkpoint('après-accusé:accusé', () => {
+      if (!ack || ack.msg.payload.ok !== true) this.fail('purge', `accusé de evora:purge absent ou négatif : ${JSON.stringify(ack && ack.msg)}`);
+    });
+    await this.checkpoint('après-accusé:restes', () => {
+      const n4 = names(after);
+      if (n4.keys.length || (after.dbs && n4.dbs.length)) this.fail('purge-left', `stockage du moteur encore présent juste après l'accusé de purge : ${JSON.stringify(n4)}`);
+    });
+    await this.checkpoint('après-accusé:autre-moteur', () => foreignKept(after, 'après la purge'));
+    await untouched(after, 'après la purge', 'après-accusé');
+    await this.restore(`localStorage.removeItem('${nsKey}'); true`);
     // 5. Plus aucune écriture : un changement de thème après la purge n'écrit rien.
     this.ids.themeAfterPurge = await this.send('evora:theme', `{ theme: 'light', accent: '#4F46E5' }`);
     const themeAck = await this.waitEngine(this.response('evora:ack', this.ids.themeAfterPurge), 15000);
-    if (!themeAck || themeAck.msg.payload.ok !== true) this.fail('theme', `accusé de evora:theme après la purge absent ou négatif : ${JSON.stringify(themeAck && themeAck.msg)}`);
+    await this.checkpoint('après-écriture:thème', () => {
+      if (!themeAck || themeAck.msg.payload.ok !== true) this.fail('theme', `accusé de evora:theme après la purge absent ou négatif : ${JSON.stringify(themeAck && themeAck.msg)}`);
+    });
+    // Derniers contrôles : les sabotages qui les visent ne sont pas retirés (plus rien ne suit).
+    await this.sabotage('purge-rewrite', 'clé du compte réécrite après la purge', `localStorage.setItem('${nsKey}', '{}'); true`);
+    await this.sabotage('session-storage', 'clé posée dans sessionStorage', `sessionStorage.setItem('evora-sabotage', '1'); true`);
+    await this.sabotage('caches', 'cache posé dans Cache Storage', `caches.open('evora-sabotage').then(() => true)`);
+    await this.sabotage('opfs', 'fichier posé dans OPFS',
+      `navigator.storage.getDirectory().then((d) => d.getFileHandle('evora-sabotage', { create: true })).then(() => true)`);
     await sleep(2500);
     const later = await this.storage();
     this.storageLog.push({ phase: 'après une écriture tentée', ...later });
-    const n5 = names(later);
-    if (n5.keys.length || (later.dbs && n5.dbs.length)) this.fail('purge-rewrite', `le moteur a de nouveau écrit après la purge : ${JSON.stringify(n5)}`);
-    untouched(later, 'après une écriture tentée');
+    await this.checkpoint('après-écriture:réécriture', () => {
+      const n5 = names(later);
+      if (n5.keys.length || (later.dbs && n5.dbs.length)) this.fail('purge-rewrite', `le moteur a de nouveau écrit après la purge : ${JSON.stringify(n5)}`);
+    });
+    await untouched(later, 'après une écriture tentée', 'après-écriture');
   }
 
   // Le dernier evora:dirty du document, après l'evora:save de la demande, vaut false.
@@ -505,7 +748,8 @@ export class EhpBench {
     const ids = new Set();
     for (const e of msgs) {
       const m = e.msg;
-      const where = `${(m && m.type) || '?'} ${JSON.stringify(m).slice(0, 200)}`;
+      // L'id en tête : un témoin sabordé crédite un rouge au message qu'il a fabriqué.
+      const where = `${(m && m.type) || '?'} id ${(m && m.id) || '?'} ${JSON.stringify(m).slice(0, 200)}`;
       if (e.origin !== this.engineOrigin || !e.plain) { this.fail('envelope', `message hors norme : ${JSON.stringify(e).slice(0, 200)}`); continue; }
       const keys = e.keys || [];
       if (!keys.every((k) => ['v', 'type', 'id', 're', 'payload'].includes(k)) || !['v', 'type', 'id', 'payload'].every((k) => keys.includes(k))) {
@@ -548,8 +792,8 @@ export class EhpBench {
           this.fail('envelope', `type inattendu pour ce moteur : ${where}`);
       }
     }
-    const readies = msgs.filter((e) => e.msg && e.msg.type === 'evora:ready').length;
-    if (readies !== 1) this.fail('ready-count', `evora:ready reçu ${readies} fois (attendu : 1)`);
+    const readies = msgs.filter((e) => e.msg && e.msg.type === 'evora:ready');
+    if (readies.length !== 1) this.fail('ready-count', `evora:ready reçu ${readies.length} fois (attendu : 1), ids ${readies.map((e) => e.msg.id).join(', ') || 'aucun'}`);
     const answered = (id) => msgs.filter((e) => e.msg && e.msg.re === id);
     for (const [key, tag, label] of [['v2', 'answer-v2', 'un evora:init de version 2'],
       ['extraField', 'answer-envelope', 'un evora:init à l\'enveloppe augmentée d\'un champ'],

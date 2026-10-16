@@ -20,10 +20,12 @@
 //! The engine announces itself (`evora:ready`) before it touches browser storage, waits for
 //! `evora:init` before it starts (`web::start`), then acknowledges it once running, or answers
 //! `evora:failed {code}` when it cannot start. Requests that need the app (`evora:open`,
-//! `evora:request-save`, `evora:theme`, `evora:lang`) are queued and applied at the start of a frame
-//! (`host_docs`). `evora:purge` empties the engine's storage (patch E5, `storage_ns`) and is
-//! acknowledged only once the deletions have completed, or answered `busy` when a connection that
-//! does not close still holds one back at the storage deadline (never left unanswered).
+//! `evora:request-save`, `evora:theme`, `evora:lang`, `evora:command`) are queued and applied at the
+//! start of a frame (`host_docs`); a command off the compiled list (`host_commands`, patch LUM-10)
+//! is refused here, before the app sees it. `evora:purge` empties the engine's storage (patch E5,
+//! `storage_ns`) and is acknowledged only once the deletions have completed, or answered `busy`
+//! when a connection that does not close still holds one back at the storage deadline (never left
+//! unanswered).
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -35,9 +37,8 @@ use wasm_bindgen::{JsCast as _, JsValue, closure::Closure};
 const APP: &str = "lumbra";
 const EHP: &str = "1.0";
 /// What this engine honours and its smoke test exercises (§9.1). Not declared: `doc.saved-ack`,
-/// `doc.multi`, `export.drive`, `pick.drive`, `font.inject`, `media.*`, `command`, `author`,
-/// `storage.memory`.
-const CAPABILITIES: [&str; 8] = ["doc.open", "doc.save", "doc.dirty", "doc.request-save", "storage.ns", "storage.purge", "live.lang", "live.theme"];
+/// `doc.multi`, `export.drive`, `pick.drive`, `font.inject`, `media.*`, `author`, `storage.memory`.
+const CAPABILITIES: [&str; 9] = ["doc.open", "doc.save", "doc.dirty", "doc.request-save", "storage.ns", "storage.purge", "live.lang", "live.theme", "command"];
 /// The admitted parent origins, beside `index.html` (§2.3).
 const CONFIG: &str = "evora-host.json";
 const LANGS: [&str; 14] = ["ar", "de", "en", "es", "fr", "hi", "id", "it", "ja", "ko", "pt", "ru", "tr", "zh-Hans"];
@@ -84,6 +85,8 @@ pub enum HostEvent {
     Theme { id: String, dark: bool },
     /// `evora:lang`: the engine language (`None`: English).
     Lang { id: String, engine_lang: Option<String> },
+    /// `evora:command` of the compiled list (patch LUM-10), without parameters.
+    Command { id: String, command: String },
 }
 
 struct State {
@@ -202,6 +205,14 @@ impl Bridge {
         }
     }
 
+    /// `evora:ack {ok: true, result}` answering the `evora:command` `re` (§4.5).
+    pub fn ack_result(&self, re: &str, result: &serde_json::Value) {
+        let Ok(value) = js_sys::JSON::parse(&result.to_string()) else { return };
+        if let Some(payload) = object(&[("ok", true.into()), ("result", value)]) {
+            let _ = self.send("evora:ack", Some(re), &payload, None);
+        }
+    }
+
     /// `evora:failed {code}`: the engine could not start (§4.4).
     pub fn failed(&self, code: &str) {
         if let Some(payload) = object(&[("code", code.into())]) {
@@ -313,6 +324,7 @@ impl Bridge {
             "evora:lang" => Some("live.lang"),
             "evora:theme" => Some("live.theme"),
             "evora:purge" => Some("storage.purge"),
+            "evora:command" => Some("command"),
             // Unknown here, or a capability this engine doesn't declare: ignored (§4.1, §10).
             _ => return,
         };
@@ -353,6 +365,7 @@ impl Bridge {
             "evora:lang" => self.on_lang(&id, &payload),
             "evora:theme" => self.on_theme(&id, &payload),
             "evora:purge" => self.on_purge(&id, &payload),
+            "evora:command" => self.on_command(&id, &payload),
             _ => {}
         }
     }
@@ -498,6 +511,29 @@ impl Bridge {
         };
         // The accent is Evora's indigo already (patch E2); only light or dark changes here.
         self.push(HostEvent::Theme { id: id.to_owned(), dark });
+    }
+
+    /// `evora:command {command, params}` (patch LUM-10, §4.3): only the compiled list of
+    /// `host_commands`, each without parameters (`params` = `{}`). A well-formed command off the
+    /// list is refused with `capability`; a malformed message, or parameters given to a command
+    /// that takes none, is ignored (§5.2).
+    fn on_command(&self, id: &str, p: &JsValue) {
+        if !only_keys(p, &["command", "params"]) {
+            return;
+        }
+        let Some(command) = get(p, "command").as_string().filter(|c| is_command_name(c)) else { return };
+        let params = get(p, "params");
+        if !plain_object(&params) {
+            return;
+        }
+        if !crate::host_commands::allowed(&command) {
+            self.ack(id, false, Some("capability"));
+            return;
+        }
+        if js_sys::Object::keys(params.unchecked_ref::<js_sys::Object>()).length() != 0 {
+            return;
+        }
+        self.push(HostEvent::Command { id: id.to_owned(), command });
     }
 
     /// `evora:purge {scope}` (patch E5, HOST-PROTOCOL §7.7): writes stop first, then the storage is
@@ -667,6 +703,12 @@ fn is_lang_tag(tag: &str) -> bool {
     let mut parts = tag.split(['-', '_']);
     let first_ok = parts.next().is_some_and(|p| (2..=3).contains(&p.len()) && p.chars().all(|c| c.is_ascii_alphabetic()));
     first_ok && parts.all(|p| (2..=8).contains(&p.len()) && p.chars().all(|c| c.is_ascii_alphanumeric()))
+}
+
+/// `command` of §4.3: `^[a-z][A-Za-z0-9_.-]*$`.
+fn is_command_name(c: &str) -> bool {
+    let mut chars = c.chars();
+    chars.next().is_some_and(|first| first.is_ascii_lowercase()) && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '-'))
 }
 
 /// `accent` of §4.2: `#` and six hex digits.

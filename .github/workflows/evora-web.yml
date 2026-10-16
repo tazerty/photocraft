@@ -73,7 +73,9 @@ defaults:
 jobs:
   web:
     name: Build web (wasm) et empaquetage
-    runs-on: ubuntu-latest
+    # Image épinglée : ubuntu-latest bascule vers Ubuntu 26 le 2026-10-19 ; Chrome, Node et brotli
+    # viennent de l'image, et target/ du cache ne doit jamais passer d'une image à l'autre.
+    runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
       - name: Checkout
@@ -110,6 +112,17 @@ jobs:
           cargo -V
           echo "RUSTC_VERSION=$(rustc -V)" >> "$GITHUB_ENV"
 
+      - name: Image du runner (épinglée)
+        run: |
+          # L'image se lit dans /etc/os-release : elle entre dans la clé du cache (target/ compilé
+          # sur une image n'est jamais restauré sur une autre) et doit être celle de runs-on.
+          . /etc/os-release
+          image="${ID}-${VERSION_ID}"
+          echo "Image du runner : ${image} (ImageOS ${ImageOS:-?}, ImageVersion ${ImageVersion:-?})"
+          [ "$image" = "ubuntu-24.04" ] \
+            || { echo "::error::image du runner ${image}, attendue ubuntu-24.04 (runs-on)"; exit 1; }
+          echo "EVORA_IMAGE=${image}" >> "$GITHUB_ENV"
+
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -118,9 +131,9 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: evora-web-${{ runner.os }}-rust-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('Cargo.lock') }}
+          key: evora-web-${{ runner.os }}-${{ env.EVORA_IMAGE }}-rust-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            evora-web-${{ runner.os }}-rust-${{ env.RUST_TOOLCHAIN }}-
+            evora-web-${{ runner.os }}-${{ env.EVORA_IMAGE }}-rust-${{ env.RUST_TOOLCHAIN }}-
 
       - name: Outils épinglés (Trunk, wasm-bindgen, wasm-opt, cargo-deny, cargo-about)
         run: |
@@ -170,8 +183,13 @@ jobs:
           cargo about --version
           [[ "$(cargo deny --version)" == *"$CARGO_DENY_VERSION"* ]]
           [[ "$(cargo about --version)" == *"$CARGO_ABOUT_VERSION"* ]]
+          # Outils de l'image (ni épinglés ni téléchargés) : présents, et Node au moins au major sur
+          # lequel le banc de fumée a été éprouvé (22, image ubuntu-24.04, run 38736104775).
+          command -v google-chrome >/dev/null || { echo "::error::google-chrome absent de l'image"; exit 1; }
           google-chrome --version
           node --version
+          node_major=$(node --version | sed -E 's/^v([0-9]+)\..*/\1/')
+          [ "$node_major" -ge 22 ] || { echo "::error::Node ${node_major} : le banc de fumée a été éprouvé sur Node 22"; exit 1; }
           brotli --version
 
       - name: Dépendances (Cargo.lock verrouillé)

@@ -12,9 +12,11 @@
 # fichiers d'hébergement, LICENSES/ complet, émojis des catalogues affichés (résolus dans la pile de
 # polices d'egui), précompression .br/.gz et empreintes CSP, test de fumée Chrome sans interface en
 # origine différente (evora/ci/), hors pont puis avec le pont hôte EHP v1 (E4, scénario « pont-ehp »)
-# et le pont muet (evora-host.json de l'artefact, vide), puis les témoins sabordés de ce banc : chacun
-# n'est VALIDE que si ses rouges sont exactement ceux attendus, chacun à sa place (autotest du verdict
-# sans navigateur, témoins « banc », « moteur » et « muet »).
+# et le pont muet (evora-host.json de l'artefact, vide), le scénario « pont-documents » (E5 pour
+# plusieurs documents moteur de la même origine, HOST-PROTOCOL §7.7 : quatre variantes), puis les
+# témoins sabordés de ces bancs : chacun n'est VALIDE que si ses rouges sont exactement ceux attendus,
+# chacun à sa place (autotest du verdict sans navigateur, témoins « banc », « moteur », « muet » et
+# « ecoutes »).
 # Chaque porte s'exécute même si une autre échoue ; le bilan échoue s'il en manque une, et l'artefact
 # n'est publié qu'après un bilan vert.
 #
@@ -436,9 +438,28 @@ jobs:
             SMOKE_BROWSER_LANG= SMOKE_EXPECT_FONTS= SMOKE_URL_STORAGE_NS= SMOKE_OLD_PURGE= \
             node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-temoin-muet.json" "$EVORA_FONTS_DIR"
           temoin_muet=$?
-          echo "Test de fumée : hors pont $hors_pont, pont EHP $pont, pont muet $muet ; autotest des témoins $autotest, témoins banc $temoin_banc, moteur $temoin_moteur, muet $temoin_muet (0 = vert ou témoin VALIDE)"
+          # E5 pour plusieurs documents (HOST-PROTOCOL §7.7, evora/ci/smoke_docs.mjs) : trois documents
+          # moteur de la même origine, comme trois onglets (compte A, puis compte B, puis un second
+          # document de B) : à l'init de B, plus rien de A malgré son document ouvert, et A ne réécrit
+          # plus ; la purge de B est accusée malgré son second document, plus rien ne reste, et ce
+          # document ne réécrit plus. Variantes : normale ; sans indexedDB.databases() ; avec la seule
+          # écoute versionchange ; avec la seule écoute storage. Puis son témoin sabordé « ecoutes »
+          # (les deux écoutes neutralisées dans les documents moteur).
+          SMOKE_DOCS_VARIANT=normal node evora/ci/smoke_docs.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-docs.json"
+          docs=$?
+          SMOKE_DOCS_VARIANT=sans-liste node evora/ci/smoke_docs.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-docs-sans-liste.json"
+          docs_sans_liste=$?
+          SMOKE_DOCS_VARIANT=versionchange node evora/ci/smoke_docs.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-docs-versionchange.json"
+          docs_versionchange=$?
+          SMOKE_DOCS_VARIANT=storage node evora/ci/smoke_docs.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-docs-storage.json"
+          docs_storage=$?
+          SMOKE_DOCS_VARIANT=normal SMOKE_SABOTAGE=ecoutes node evora/ci/smoke_docs.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-temoin-ecoutes.json"
+          temoin_ecoutes=$?
+          echo "Test de fumée : hors pont $hors_pont, pont EHP $pont, pont muet $muet ; pont-documents $docs, sans liste $docs_sans_liste, versionchange seule $docs_versionchange, storage seule $docs_storage ; autotest des témoins $autotest, témoins banc $temoin_banc, moteur $temoin_moteur, muet $temoin_muet, ecoutes $temoin_ecoutes (0 = vert ou témoin VALIDE)"
           [ "$hors_pont" -eq 0 ] && [ "$pont" -eq 0 ] && [ "$muet" -eq 0 ] && [ "$autotest" -eq 0 ] \
-            && [ "$temoin_banc" -eq 0 ] && [ "$temoin_moteur" -eq 0 ] && [ "$temoin_muet" -eq 0 ]
+            && [ "$temoin_banc" -eq 0 ] && [ "$temoin_moteur" -eq 0 ] && [ "$temoin_muet" -eq 0 ] \
+            && [ "$docs" -eq 0 ] && [ "$docs_sans_liste" -eq 0 ] && [ "$docs_versionchange" -eq 0 ] && [ "$docs_storage" -eq 0 ] \
+            && [ "$temoin_ecoutes" -eq 0 ]
 
       - name: Bilan des portes
         env:

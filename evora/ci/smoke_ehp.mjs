@@ -19,7 +19,8 @@
 //     l'espace de noms reçu dans evora:init ;
 //   - stockage (E5 corrigé) : restes posés avant le démarrage (autre compte, noms nus de l'amont)
 //     purgés à l'init, noms d'un autre moteur de la même origine conservés ; tout le stockage du
-//     moteur sous <storageNs>: ; aucune purge par un message de version 2, à champ en trop ou venu
+//     moteur sous <storageNs>: (marqueur de base <storageNs>:photocraft.presets compris, aucun
+//     marqueur d'un autre espace) ; aucune purge par un message de version 2, à champ en trop ou venu
 //     des témoins ; la vraie purge efface d'abord les clés, n'est PAS accusée tant qu'une autre
 //     connexion bloque la suppression de la base, puis l'est une fois la base supprimée, avec un
 //     stockage vide juste après l'accusé (restes hors espace de noms compris) ; plus aucune
@@ -40,7 +41,9 @@
 //     deleteDatabase qui réussissent sans rien effacer (le moteur croit purger) : seuls les
 //     détecteurs de MOTEUR_REDS doivent rougir, chacun à son contrôle ;
 //   - « muet » (scénario pont-muet de smoke.mjs) : le banc admet à tort la page parente dans
-//     evora-host.json : seuls MUET_REDS doivent rougir.
+//     evora-host.json : seuls MUET_REDS doivent rougir ;
+//   - « ecoutes » (scénario pont-documents, smoke_docs.mjs) : les écoutes versionchange et storage
+//     des documents moteur sont neutralisées : seuls DOCS_REDS doivent rougir, chacun à son contrôle.
 import zlib from 'node:zlib';
 
 export const SCENARIO = 'pont-ehp';
@@ -68,7 +71,7 @@ const FAIL_CODES = ['no_webgl2', 'wasm', 'memory', 'panic', 'unsupported_browser
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Témoin sabordé joué par ce passage ('' : aucun, le banc normal).
 export const SABOTAGE = process.env.SMOKE_SABOTAGE || '';
-if (!['', 'banc', 'moteur', 'muet'].includes(SABOTAGE)) throw new Error(`SMOKE_SABOTAGE inconnu : ${SABOTAGE}`);
+if (!['', 'banc', 'moteur', 'muet', 'ecoutes'].includes(SABOTAGE)) throw new Error(`SMOKE_SABOTAGE inconnu : ${SABOTAGE}`);
 // Témoin « banc » : chaque sabotage, le seul détecteur qui doit rougir et, quand ce détecteur est un
 // contrôle du stockage, le contrôle (checkpoint) où il doit rougir. Un sabotage « message » est
 // crédité seulement par un rouge qui cite l'id du message fabriqué.
@@ -105,17 +108,30 @@ export const MOTEUR_REDS = [
 // Témoin « muet » (scénario pont-muet, parent admis à tort) : le moteur s'annonce et ne se tait plus
 // pour la raison attendue ; il ne démarre toujours pas (il attend evora:init) et n'écrit rien.
 export const MUET_REDS = [{ tag: 'muet:message' }, { tag: 'muet:raison' }];
+// Témoin « ecoutes » (scénario pont-documents, écoutes versionchange et storage neutralisées dans
+// les documents moteur) : chaque document vivant garde sa base ouverte et réécrit ses clés. Rouges
+// attendus, chacun à son contrôle : la base de l'autre compte survit à l'init du compte suivant,
+// l'autre compte réécrit ses préférences, la purge d'un compte ouvert dans deux documents n'est pas
+// accusée positivement (busy à l'échéance du moteur), ses restes survivent, et le second document
+// réécrit ses préférences.
+export const DOCS_REDS = [
+  { tag: 'docs:base', at: 'b-init:base' },
+  { tag: 'docs:reecriture', at: 'a-ecriture:cle' },
+  { tag: 'docs:purge-accuse', at: 'purge-deux:accuse' },
+  { tag: 'docs:purge-restes', at: 'purge-deux:restes' },
+  { tag: 'docs:reecriture', at: 'deux-ecriture:cle' },
+];
 
-// L'étiquette d'un problème du rapport ([ehp:…] ou [muet:…]), ou null.
+// L'étiquette d'un problème du rapport ([ehp:…], [muet:…] ou [docs:…]), ou null.
 export function tagOf(problem) {
-  const m = /^\[((?:ehp|muet):[^\]]+)\]/.exec(String(problem));
+  const m = /^\[((?:ehp|muet|docs):[^\]]+)\]/.exec(String(problem));
   return m ? m[1] : null;
 }
 
 // Verdict exact d'un témoin sabordé : chaque rouge attendu est vu, à sa place et crédité à son
 // sabotage ; aucun autre rouge (étiqueté ou non) ; aucun contrôle non visé n'a rougi.
 export function witness({ mode, problems, sabotaged = [], checks = [], started }) {
-  const inventory = { banc: BANC_SABOTAGES, moteur: MOTEUR_REDS, muet: MUET_REDS }[mode];
+  const inventory = { banc: BANC_SABOTAGES, moteur: MOTEUR_REDS, muet: MUET_REDS, ecoutes: DOCS_REDS }[mode];
   if (!inventory) throw new Error(`témoin inconnu : ${mode}`);
   const list = problems.map(String);
   const untagged = list.filter((p) => !tagOf(p));
@@ -614,7 +630,11 @@ export class EhpBench {
   // et retirés juste après (restore), pour ne déborder sur aucun autre.
   async storagePhases(sessionState) {
     const mine = { keys: [`${STORAGE_NS}:${PREFS}`], dbs: [`${STORAGE_NS}:${PRESETS}`] };
-    const names = (st) => ({ keys: EhpBench.engineNames(st.keys, PREFS), dbs: EhpBench.engineNames(st.dbs, PRESETS) });
+    // keys : préférences ; markers : marqueurs de base (clé localStorage nommée comme la base) ;
+    // dbs : bases IndexedDB.
+    const names = (st) => ({ keys: EhpBench.engineNames(st.keys, PREFS), markers: EhpBench.engineNames(st.keys, PRESETS),
+      dbs: EhpBench.engineNames(st.dbs, PRESETS) });
+    const foreignMarkers = (n) => n.markers.filter((k) => k !== `${STORAGE_NS}:${PRESETS}`);
     const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
     const nsKey = `${STORAGE_NS}:${PREFS}`;
     const foreignKept = (st, phase) => {
@@ -640,7 +660,7 @@ export class EhpBench {
     const session = SABOTAGE === 'banc' ? await this.storage() : sessionState;
     await this.checkpoint('init:espace', () => {
       const n1 = names(session);
-      if (!same(n1.keys, mine.keys) || (session.dbs && !same(n1.dbs, mine.dbs))) {
+      if (!same(n1.keys, mine.keys) || foreignMarkers(n1).length || (session.dbs && !same(n1.dbs, mine.dbs))) {
         this.fail('namespace', `stockage du moteur hors de l'espace de noms ou restes non purgés à l'init : ${JSON.stringify(n1)}, attendu ${JSON.stringify(mine)}`);
       }
     });
@@ -707,7 +727,7 @@ export class EhpBench {
     });
     await this.checkpoint('après-accusé:restes', () => {
       const n4 = names(after);
-      if (n4.keys.length || (after.dbs && n4.dbs.length)) this.fail('purge-left', `stockage du moteur encore présent juste après l'accusé de purge : ${JSON.stringify(n4)}`);
+      if (n4.keys.length || n4.markers.length || (after.dbs && n4.dbs.length)) this.fail('purge-left', `stockage du moteur encore présent juste après l'accusé de purge : ${JSON.stringify(n4)}`);
     });
     await this.checkpoint('après-accusé:autre-moteur', () => foreignKept(after, 'après la purge'));
     await untouched(after, 'après la purge', 'après-accusé');
@@ -729,7 +749,7 @@ export class EhpBench {
     this.storageLog.push({ phase: 'après une écriture tentée', ...later });
     await this.checkpoint('après-écriture:réécriture', () => {
       const n5 = names(later);
-      if (n5.keys.length || (later.dbs && n5.dbs.length)) this.fail('purge-rewrite', `le moteur a de nouveau écrit après la purge : ${JSON.stringify(n5)}`);
+      if (n5.keys.length || n5.markers.length || (later.dbs && n5.dbs.length)) this.fail('purge-rewrite', `le moteur a de nouveau écrit après la purge : ${JSON.stringify(n5)}`);
     });
     await untouched(later, 'après une écriture tentée', 'après-écriture');
   }

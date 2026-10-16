@@ -160,7 +160,11 @@ pub fn start() {
                         app.set_wgpu(rs);
                     }
                     let unsaved = Arc::new(AtomicBool::new(false));
-                    guard_unload(unsaved.clone());
+                    // Evora build (patch LUM-04): under the bridge the host shell guards the page
+                    // (HOST-PROTOCOL §6.2): the engine's own prompt stays silent, never a second one.
+                    if shell_bridge.is_none() {
+                        guard_unload(unsaved.clone());
+                    }
                     // Evora build (patch E4): the host's requests reach the app between frames.
                     let host = shell_bridge.map(|bridge| {
                         bridge.attach(cc.egui_ctx.clone());
@@ -524,7 +528,7 @@ impl eframe::App for WebShell {
         self.app.ui(ui, frame);
         self.save_presets(ui.ctx());
         if let Some(host) = self.host.as_mut() {
-            host.report(&self.app);
+            host.report(&mut self.app);
         }
     }
 }

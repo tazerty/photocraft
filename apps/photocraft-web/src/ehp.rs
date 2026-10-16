@@ -26,6 +26,9 @@
 //! `storage_ns`) and is acknowledged only once the deletions have completed, or answered `busy`
 //! when a connection that does not close still holds one back at the storage deadline (never left
 //! unanswered).
+//!
+//! Patch LUM-04: with `doc.saved-ack` effective, `evora:saved` decides the saved state
+//! (`host_docs`); a panic of the engine is reported once as `evora:failed {code: "panic"}` (§4.4).
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -36,13 +39,33 @@ use wasm_bindgen::{JsCast as _, JsValue, closure::Closure};
 /// Build slug and protocol version announced in `evora:ready` (§4.4, §10).
 const APP: &str = "lumbra";
 const EHP: &str = "1.0";
-/// What this engine honours and its smoke test exercises (§9.1). Not declared: `doc.saved-ack`,
-/// `doc.multi`, `export.drive`, `pick.drive`, `font.inject`, `media.*`, `author`, `storage.memory`.
-const CAPABILITIES: [&str; 9] = ["doc.open", "doc.save", "doc.dirty", "doc.request-save", "storage.ns", "storage.purge", "live.lang", "live.theme", "command"];
+/// What this engine honours and its smoke test exercises (§9.1). Not declared: `doc.multi`,
+/// `export.drive`, `pick.drive`, `font.inject`, `media.*`, `author`, `storage.memory`.
+const CAPABILITIES: [&str; 10] =
+    ["doc.open", "doc.save", "doc.saved-ack", "doc.dirty", "doc.request-save", "storage.ns", "storage.purge", "live.lang", "live.theme", "command"];
 /// The admitted parent origins, beside `index.html` (§2.3).
 const CONFIG: &str = "evora-host.json";
 const LANGS: [&str; 14] = ["ar", "de", "en", "es", "fr", "hi", "id", "it", "ja", "ko", "pt", "ru", "tr", "zh-Hans"];
 const REASONS: [&str; 5] = ["autosave", "visibility", "close", "logout", "user"];
+/// `ackCode` of §4.2: what `evora:saved {ok: false}` may carry in `error`.
+const ACK_CODES: [&str; 16] = [
+    "clean",
+    "cancelled",
+    "conflict",
+    "too_large",
+    "quota",
+    "forbidden",
+    "not_found",
+    "invalid_content",
+    "unsupported",
+    "rate_limited",
+    "read_only",
+    "busy",
+    "capability",
+    "network",
+    "server",
+    "timeout",
+];
 const CAPABILITY_NAMES: [&str; 18] = [
     "doc.open",
     "doc.save",
@@ -87,6 +110,8 @@ pub enum HostEvent {
     Lang { id: String, engine_lang: Option<String> },
     /// `evora:command` of the compiled list (patch LUM-10), without parameters.
     Command { id: String, command: String },
+    /// `evora:saved` answering the `evora:save` `re`, with `doc.saved-ack` effective (LUM-04).
+    Saved { re: String, ok: bool },
 }
 
 struct State {
@@ -109,6 +134,9 @@ struct State {
     pending_saves: Vec<String>,
     /// `evora:request-save` waiting for the save it asked for: (docRef, request id).
     expected_saves: Vec<(String, String)>,
+    /// Saves sent since the app last took them: (`evora:save` id, docRef), bound to their
+    /// documents at the end of the frame (`host_docs`, patch LUM-04).
+    sent: Vec<(String, String)>,
 }
 
 /// The connected bridge (a parent admitted by `evora-host.json`).
@@ -119,6 +147,7 @@ pub struct Bridge(Rc<RefCell<State>>);
 /// admitted parent, the bridge stays mute.
 pub async fn connect() -> Option<Bridge> {
     let (window, parent, origin) = admitted_parent().await?;
+    install_panic_hook(&parent, &origin);
     let bridge = Bridge(Rc::new(RefCell::new(State {
         parent,
         origin,
@@ -134,6 +163,7 @@ pub async fn connect() -> Option<Bridge> {
         ctx: None,
         pending_saves: Vec::new(),
         expected_saves: Vec::new(),
+        sent: Vec::new(),
     })));
     let listener = bridge.clone();
     let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| listener.receive(&event));
@@ -276,8 +306,15 @@ impl Bridge {
         ])
         .ok_or("busy")?;
         let id = self.send("evora:save", re, &payload, Some(&buffer)).ok_or("busy")?;
-        self.0.borrow_mut().pending_saves.push(id);
+        let mut st = self.0.borrow_mut();
+        st.pending_saves.push(id.clone());
+        st.sent.push((id, doc_ref.to_owned()));
         Ok(())
+    }
+
+    /// The saves sent since the last call: (`evora:save` id, docRef).
+    pub fn take_sent(&self) -> Vec<(String, String)> {
+        std::mem::take(&mut self.0.borrow_mut().sent)
     }
 
     /// Post a message to the admitted parent origin; returns its `id`.
@@ -316,6 +353,7 @@ impl Bridge {
             return;
         }
         let Some(kind) = get(&data, "type").as_string() else { return };
+        smoke_panic(&kind);
         let capability = match kind.as_str() {
             "evora:init" => None,
             "evora:open" => Some("doc.open"),
@@ -465,15 +503,31 @@ impl Bridge {
         self.push(HostEvent::Open { id: id.to_owned(), doc_ref, name, bytes: data });
     }
 
+    /// `evora:saved {ok, version?, docRef?, error?}` (§4.3): `ok: true` with a version and no error,
+    /// `ok: false` with an error code and neither version nor docRef. With `doc.saved-ack`
+    /// effective, the answer reaches the app (patch LUM-04); without it, the engine counted the
+    /// document saved when it handed it over and the host keeps its own save state (§6.3).
     fn on_saved(&self, re: Option<&str>, p: &JsValue) {
         let Some(re) = re else { return };
-        let mut st = self.0.borrow_mut();
-        if !st.pending_saves.iter().any(|s| s == re) || !only_keys(p, &["ok", "version", "docRef", "error"]) || get(p, "ok").as_bool().is_none() {
+        if !self.0.borrow().pending_saves.iter().any(|s| s == re) || !only_keys(p, &["ok", "version", "docRef", "error"]) {
             return;
         }
-        st.pending_saves.retain(|s| s != re);
-        // Without `doc.saved-ack` the engine counted the document saved when it handed it over;
-        // the host keeps its own save state (HOST-PROTOCOL §6.3).
+        let Some(ok) = get(p, "ok").as_bool() else { return };
+        let version = get(p, "version");
+        let doc_ref = get(p, "docRef");
+        let error = get(p, "error");
+        let valid = if ok {
+            positive_integer(&version).is_some() && error.is_undefined() && (doc_ref.is_undefined() || doc_ref.as_string().is_some_and(|r| is_ulid(&r)))
+        } else {
+            error.as_string().is_some_and(|e| ACK_CODES.contains(&e.as_str())) && version.is_undefined() && doc_ref.is_undefined()
+        };
+        if !valid {
+            return;
+        }
+        self.0.borrow_mut().pending_saves.retain(|s| s != re);
+        if self.has("doc.saved-ack") {
+            self.push(HostEvent::Saved { re: re.to_owned(), ok });
+        }
     }
 
     fn on_request_save(&self, id: &str, p: &JsValue) {
@@ -561,6 +615,48 @@ impl Bridge {
         });
     }
 }
+
+thread_local! {
+    /// Where a panic is reported: the admitted parent window and its origin (patch LUM-04).
+    static PANIC_TARGET: RefCell<Option<(web_sys::Window, String)>> = RefCell::new(None);
+}
+/// A panic is reported once.
+static PANIC_REPORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Patch LUM-04: a panic of the engine reaches the host once, as `evora:failed {code: "panic"}`
+/// (§4.4), after the hooks already installed (the browser console) have run. The WebAssembly
+/// instance stops right after; the host words the message and offers to retry or leave.
+fn install_panic_hook(parent: &web_sys::Window, origin: &str) {
+    PANIC_TARGET.with(|t| *t.borrow_mut() = Some((parent.clone(), origin.to_owned())));
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        previous(info);
+        if PANIC_REPORTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let _ = PANIC_TARGET.try_with(|t| {
+            let Ok(target) = t.try_borrow() else { return };
+            let Some((host_window, host_origin)) = target.as_ref() else { return };
+            let Some(payload) = object(&[("code", "panic".into())]) else { return };
+            if let Some((message, _)) = envelope("evora:failed", None, &payload) {
+                let _ = host_window.post_message(&message, host_origin);
+            }
+        });
+    }));
+}
+
+/// Smoke build only (`--features evora-smoke`, never the served artifact): the admitted parent
+/// asks for a panic, which proves the panic hook end to end (`evora/ci/smoke_ehp.mjs`).
+#[cfg(feature = "evora-smoke")]
+#[allow(clippy::panic)]
+fn smoke_panic(kind: &str) {
+    if kind == "evora:smoke-panic" {
+        panic!("evora smoke: panic requested by the host");
+    }
+}
+
+#[cfg(not(feature = "evora-smoke"))]
+fn smoke_panic(_kind: &str) {}
 
 /// The parent window and its origin, when the page is framed by an origin `evora-host.json` admits.
 /// The browser's own record of the parent (`location.ancestorOrigins`) decides when it exists;

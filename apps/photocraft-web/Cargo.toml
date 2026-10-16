@@ -10,6 +10,10 @@ publish = false
 # Open HEIC/HEIF photos (the optional photocraft-heif crate). Not default so distributors choose
 # it; official builds (CI, packaging/, release) build with `--features heif`.
 heif = ["photocraft-codecs/heif"]
+# Evora build (patch LUM-04): the smoke build of the CI only (evora/ci/smoke_ehp.mjs, scenario
+# pont-panique), never the served artifact: the host may ask the engine to panic, to prove that
+# the panic reaches it as `evora:failed {code: "panic"}`.
+evora-smoke = []
 
 [lints]
 workspace = true

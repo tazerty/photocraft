@@ -22,7 +22,8 @@
 //! `evora:failed {code}` when it cannot start. Requests that need the app (`evora:open`,
 //! `evora:request-save`, `evora:theme`, `evora:lang`) are queued and applied at the start of a frame
 //! (`host_docs`). `evora:purge` empties the engine's storage (patch E5, `storage_ns`) and is
-//! acknowledged only once the deletions have completed.
+//! acknowledged only once the deletions have completed, or answered `busy` when a connection that
+//! does not close still holds one back at the storage deadline (never left unanswered).
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -500,7 +501,9 @@ impl Bridge {
     }
 
     /// `evora:purge {scope}` (patch E5, HOST-PROTOCOL §7.7): writes stop first, then the storage is
-    /// deleted; the acknowledgement follows the completed deletion.
+    /// deleted; the acknowledgement follows the completed deletion (`busy` if one is still held back
+    /// at the storage deadline). The engine's other documents stop their writes and close their
+    /// presets database as soon as the purge reaches them (`storage_ns`).
     fn on_purge(&self, id: &str, p: &JsValue) {
         let all = match get(p, "scope").as_string().as_deref() {
             Some("all") => true,

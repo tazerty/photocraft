@@ -11,7 +11,8 @@ use photocraft_engine::preset_store::MAX_STORE_BYTES;
 /// The presets database's name, inside the host's storage namespace (patch E5, `storage_ns`).
 pub const DATABASE: &str = "photocraft.presets";
 const FILES: &str = "files";
-const TIMEOUT_MS: f64 = 10_000.0;
+/// Upstream's single deadline for a storage step; the purges of patch E5 (`storage_ns`) use it too.
+pub(crate) const TIMEOUT_MS: f64 = 10_000.0;
 
 fn js(e: JsValue) -> String {
     if let Some(exception) = e.dyn_ref::<web_sys::DomException>() {
@@ -76,7 +77,7 @@ fn request(request: &IdbRequest) -> Pending {
 }
 
 /// A single deadline bounds the whole startup read, not ten seconds per record.
-async fn before(promise: &Promise, deadline: f64) -> Result<JsValue, String> {
+pub(crate) async fn before(promise: &Promise, deadline: f64) -> Result<JsValue, String> {
     let window = web_sys::window().ok_or("no window")?;
     let mut timer = None;
     let mut callback = None;
@@ -102,6 +103,9 @@ async fn open(deadline: f64) -> Result<IdbDatabase, String> {
     // Evora build (patch E5): the name carries the host's storage namespace; a refused namespace
     // (malformed `storageNs`) or a purged one opens nothing (presets stay session-only).
     let name = crate::storage_ns::key(DATABASE).ok_or("browser storage refused (storageNs)")?;
+    // Evora build (patch E5, several documents): under the bridge, the database's marker first, so
+    // a purge finds it even where the browser cannot list databases.
+    crate::storage_ns::mark_database();
     let req = factory.open_with_u32(&name, 1).map_err(js)?;
     let mut upgrade = Listeners::new();
     let upgrade_req = req.clone();
@@ -117,7 +121,12 @@ async fn open(deadline: f64) -> Result<IdbDatabase, String> {
         .map_err(js)?;
     let pending = request(&req);
     match before(&pending.promise, deadline).await {
-        Ok(value) => value.dyn_into().map_err(|_| "invalid preset database".into()),
+        Ok(value) => {
+            let db: IdbDatabase = value.dyn_into().map_err(|_| String::from("invalid preset database"))?;
+            // Evora build (patch E5, several documents): another document's purge closes it at once.
+            crate::storage_ns::watch_database(&db);
+            Ok(db)
+        }
         Err(e) => {
             // An open request cannot be cancelled (another tab may block its upgrade). Keep
             // its handlers alive and close any late connection; never hydrate a live session.

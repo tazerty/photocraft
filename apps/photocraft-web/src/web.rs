@@ -86,7 +86,9 @@ pub fn start() {
         };
         // Evora build (patch E5, corrected with E4): the storage namespace comes only from
         // `evora:init`, before any storage is read (never from the URL); with `storage.purge`, the
-        // other namespaces and upstream's bare names are deleted first (HOST-PROTOCOL §7.7 b).
+        // other namespaces and upstream's bare names are deleted first (HOST-PROTOCOL §7.7 b),
+        // awaited within the storage deadline before the engine opens its own storage; an engine
+        // document of the previous account still open stops writing and lets them go.
         // Without the bridge, upstream's names.
         match (&bridge, &init) {
             (Some(bridge), Some(init)) => {

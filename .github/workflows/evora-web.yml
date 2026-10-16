@@ -16,7 +16,9 @@
 # plusieurs documents moteur de la même origine, HOST-PROTOCOL §7.7 : quatre variantes), puis les
 # témoins sabordés de ces bancs : chacun n'est VALIDE que si ses rouges sont exactement ceux attendus,
 # chacun à sa place (autotest du verdict sans navigateur, témoins « banc », « moteur », « muet » et
-# « ecoutes »).
+# « ecoutes »). Puis un build de fumée (feature evora-smoke, jamais empaqueté) prouve que la panique
+# du moteur parvient à la coquille (scénario « pont-panique », LUM-04) ; son marqueur doit être absent
+# du .wasm servi.
 # Chaque porte s'exécute même si une autre échoue ; le bilan échoue s'il en manque une, et l'artefact
 # n'est publié qu'après un bilan vert.
 #
@@ -461,12 +463,54 @@ jobs:
             && [ "$docs" -eq 0 ] && [ "$docs_sans_liste" -eq 0 ] && [ "$docs_versionchange" -eq 0 ] && [ "$docs_storage" -eq 0 ] \
             && [ "$temoin_ecoutes" -eq 0 ]
 
+      - name: Fumée de la panique (build evora-smoke, hors artefact)
+        id: panic
+        continue-on-error: true
+        timeout-minutes: 30
+        env:
+          CHROME_BIN: google-chrome
+          SMOKE_TIMEOUT_MS: "180000"
+        run: |
+          # LUM-04 (e) : un second build du moteur, avec la feature evora-smoke (la coquille admise peut
+          # le faire paniquer), prouve que la panique parvient à la coquille en un seul evora:failed
+          # {code: "panic"}. Ce build n'est jamais empaqueté : son marqueur doit être présent dans son
+          # .wasm (sinon la recette ne prouve rien) et absent du .wasm servi. Même profil que le build
+          # servi (cache cargo partagé), sans wasm-opt.
+          smoke_dir="$RUNNER_TEMP/evora-web-smoke"
+          (
+            cd apps/photocraft-web
+            sed 's/data-wasm-opt="z"/data-wasm-opt="0" data-cargo-features="evora-smoke"/' index.html > "$RUNNER_TEMP/index-smoke.html"
+            grep -q 'data-cargo-features="evora-smoke"' "$RUNNER_TEMP/index-smoke.html"
+            cp "$RUNNER_TEMP/index-smoke.html" index-smoke.html
+            trunk --offline=true build --release --locked --dist "$smoke_dir" index-smoke.html
+            rm -f index-smoke.html
+            git diff --exit-code -- ../../Cargo.lock
+          )
+          [ -f "$smoke_dir/index.html" ] || mv "$smoke_dir/index-smoke.html" "$smoke_dir/index.html"
+          python3 -I evora/ci/csp_hashes.py "$smoke_dir/index.html" "$smoke_dir/csp-hashes.txt"
+          count() { # dossier : occurrences du marqueur dans ses .wasm
+            python3 -I -c 'import glob, sys; print(sum(open(f, "rb").read().count(b"evora:smoke-panic") for f in glob.glob(sys.argv[1] + "/*.wasm")))' "$1"
+          }
+          smoke_hits=$(count "$smoke_dir")
+          served_hits=$(count "$EVORA_PKG_DIR")
+          {
+            echo "### Fumée de la panique (build evora-smoke, LUM-04)"
+            echo
+            echo "Marqueur \`evora:smoke-panic\` : $smoke_hits occurrence(s) dans le build de fumée, $served_hits dans le .wasm servi (attendu : au moins 1, puis 0)."
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$smoke_hits" -ge 1 ] || { echo "::error::marqueur absent du build de fumée : la recette ne prouve rien"; exit 1; }
+          [ "$served_hits" -eq 0 ] || { echo "::error::le marqueur du build de fumée est dans le .wasm servi"; exit 1; }
+          SMOKE_SCENARIO=pont-panique SMOKE_QUERY="host=evora&webgl" \
+            node evora/ci/smoke.mjs "$smoke_dir" "$smoke_dir/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-panique.json" "$EVORA_FONTS_DIR"
+
       - name: Bilan des portes
         env:
           DENY: ${{ steps.deny.outcome }}
           ABOUT: ${{ steps.about.outcome }}
           GATES: ${{ steps.gates.outcome }}
           SMOKE: ${{ steps.smoke.outcome }}
+          PANIC: ${{ steps.panic.outcome }}
         run: |
           {
             echo "### Bilan des portes"
@@ -477,9 +521,10 @@ jobs:
             echo "| cargo-about | $ABOUT |"
             echo "| Portes Evora | $GATES |"
             echo "| Test de fumée | $SMOKE |"
+            echo "| Fumée de la panique (build evora-smoke) | $PANIC |"
           } >> "$GITHUB_STEP_SUMMARY"
-          for o in "$DENY" "$ABOUT" "$GATES" "$SMOKE"; do
-            [ "$o" = "success" ] || { echo "::error::une porte bloquante a échoué (deny=$DENY about=$ABOUT gates=$GATES smoke=$SMOKE)"; exit 1; }
+          for o in "$DENY" "$ABOUT" "$GATES" "$SMOKE" "$PANIC"; do
+            [ "$o" = "success" ] || { echo "::error::une porte bloquante a échoué (deny=$DENY about=$ABOUT gates=$GATES smoke=$SMOKE panic=$PANIC)"; exit 1; }
           done
 
       - name: Artefact

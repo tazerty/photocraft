@@ -25,6 +25,11 @@
 // page parente, ne démarre pas, n'écrit aucun stockage, et le dit (avertissement « admits no parent
 // origin »).
 //
+// SMOKE_SCENARIO=pont-panique (patch LUM-04) : sur le build de fumée (feature evora-smoke) seulement,
+// la coquille minimale fait paniquer le moteur après l'accusé de son evora:init ; le crochet de
+// panique doit envoyer un seul evora:failed {code: "panic"}. Les erreurs de page qui suivent la
+// demande sont celles de la panique : comptées à part.
+//
 // SMOKE_SABOTAGE=banc|moteur (avec pont-ehp) ou muet (avec pont-muet) : témoin sabordé du banc ; le
 // passage sort en 0 seulement si le verdict exact du témoin est VALIDE (smoke_ehp.mjs, witness).
 import { spawn } from 'node:child_process';
@@ -55,14 +60,17 @@ const BROWSER_LANG = process.env.SMOKE_BROWSER_LANG || '';
 const EXPECT_FONTS = process.env.SMOKE_EXPECT_FONTS === '1';
 // E4 : scénario du pont hôte EHP v1.
 const SCENARIO = process.env.SMOKE_SCENARIO || 'hors-pont';
-const EHP = SCENARIO === ehp.SCENARIO;
+// LUM-04 : panique du build de fumée, sous la même coquille minimale.
+const PANIQUE = SCENARIO === ehp.PANIC_SCENARIO;
+const EHP = SCENARIO === ehp.SCENARIO || PANIQUE;
 // E4 : pont muet (evora-host.json de l'artefact, vide).
 const MUET = SCENARIO === 'pont-muet';
-if (!['hors-pont', ehp.SCENARIO, 'pont-muet'].includes(SCENARIO)) throw new Error(`SMOKE_SCENARIO inconnu : ${SCENARIO}`);
+if (!['hors-pont', ehp.SCENARIO, 'pont-muet', ehp.PANIC_SCENARIO].includes(SCENARIO)) throw new Error(`SMOKE_SCENARIO inconnu : ${SCENARIO}`);
 // Témoins sabordés : banc et moteur sur pont-ehp, muet sur pont-muet.
 const SABOTAGE = ehp.SABOTAGE;
 if (SABOTAGE && (SABOTAGE === 'muet') !== MUET) throw new Error(`témoin ${SABOTAGE} incompatible avec le scénario ${SCENARIO}`);
 if (SABOTAGE && !EHP && !MUET) throw new Error(`témoin ${SABOTAGE} sans scénario de pont`);
+if (SABOTAGE && PANIQUE) throw new Error(`aucun témoin sabordé pour ${SCENARIO}`);
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -70,7 +78,10 @@ const TYPES = {
   '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ttf': 'font/ttf', '.woff2': 'font/woff2',
 };
 
-const report = { ok: false, errors: [], allowed: [], warnings: [], console: [], served: {}, steps: [] };
+const report = { ok: false, errors: [], allowed: [], warnings: [], console: [], served: {}, steps: [], afterPanic: [] };
+// LUM-04 : une fois la panique demandée (pont-panique), les erreurs de page sont les siennes.
+let panicSent = false;
+const pageError = (item) => (panicSent ? report.afterPanic : report.errors).push(item);
 const log = (m) => { report.steps.push(m); console.log(m); };
 
 function policyFor(parentOrigin) {
@@ -311,12 +322,12 @@ async function main() {
         break;
       case 'Runtime.exceptionThrown': {
         const d = p.exceptionDetails || {};
-        report.errors.push(`${where} : exception ${(d.exception && d.exception.description) || d.text} (${d.url || ''}:${d.lineNumber})`);
+        pageError(`${where} : exception ${(d.exception && d.exception.description) || d.text} (${d.url || ''}:${d.lineNumber})`);
         break;
       }
       case 'Runtime.consoleAPICalled': {
         const text = (p.args || []).map((a) => a.value ?? a.description ?? '').join(' ');
-        if (p.type === 'error' || p.type === 'assert') report.errors.push(`${where} : console.${p.type} ${text}`);
+        if (p.type === 'error' || p.type === 'assert') pageError(`${where} : console.${p.type} ${text}`);
         else if (p.type === 'warning') report.warnings.push(`${where} : ${text}`.slice(0, 300));
         else if (report.console.length < 60) report.console.push(`${where} : ${text}`.slice(0, 300));
         break;
@@ -326,7 +337,7 @@ async function main() {
         if (e.level === 'error') {
           const item = `${where} : [${e.source}] ${e.text} ${e.url || ''}`.trim();
           if (isAllowed(e.url, e.text)) report.allowed.push(item);
-          else report.errors.push(item);
+          else pageError(item);
         } else if (e.level === 'warning') {
           report.warnings.push(`${where} : [${e.source}] ${e.text}`.slice(0, 300));
         }
@@ -334,7 +345,7 @@ async function main() {
       }
       case 'Target.targetCrashed':
       case 'Inspector.targetCrashed':
-        report.errors.push(`${where} : plantage de la cible`);
+        pageError(`${where} : plantage de la cible`);
         break;
       default:
         break;
@@ -396,7 +407,8 @@ async function main() {
     last = JSON.parse(r.result.value);
     if (bench) {
       try {
-        await bench.session();
+        if (PANIQUE) await bench.panic(() => { panicSent = true; });
+        else await bench.session();
       } catch (e) {
         bench.fail('bench', `scénario interrompu : ${e.message}`);
       }
@@ -509,6 +521,7 @@ async function main() {
     `| Scénario | ${SCENARIO} |`,
     `| Paramètres du moteur | \`?${QUERY}\` |`,
     ...(report.ehp ? [`| Échanges EHP vus de la page parente | ${report.ehp.exchanges.length} message(s) du moteur |`] : []),
+    ...(PANIQUE ? [`| Erreurs de page après la demande de panique (attendues) | ${report.afterPanic.length} |`] : []),
     `| Stockage (localStorage / IndexedDB) | ${report.storage ? `${report.storage.keys.join(', ') || 'aucune clé'} / ${(report.storage.dbs || []).join(', ') || 'aucune base'}` : '—'} |`,
     `| Ancienne purge hors pont (sans effet attendu) | ${report.oldPurge ? `${report.oldPurge.keys.length} clé(s), ${(report.oldPurge.dbs || []).length} base(s) après le message` : '—'} |`,
     `| Polices servies reçues | ${Object.keys(report.served).filter((k) => k.startsWith('/fonts/')).join(', ') || 'aucune'} |`,
@@ -525,6 +538,7 @@ async function main() {
   console.log(text);
   for (const w of report.warnings.slice(0, 20)) console.log(`avertissement : ${w}`);
   for (const m of report.console.slice(0, 30)) console.log(`console : ${m}`);
+  for (const m of report.afterPanic.slice(0, 10)) console.log(`après la panique : ${m.slice(0, 300)}`);
   for (const [k, v] of Object.entries(report.served)) console.log(`servi : ${k} ×${v}`);
   if (report.ehp) for (const m of report.ehp.exchanges) console.log(`ehp : ${m}`);
   if (report.ehp) for (const st of report.ehp.storage) console.log(`ehp stockage : ${JSON.stringify(st)}`);

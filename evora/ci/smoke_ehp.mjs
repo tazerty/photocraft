@@ -13,8 +13,15 @@
 //   - evora:open d'une petite image PNG reçue en octets : accusé positif, puis evora:dirty false ;
 //   - une modification (Ctrl+A, Sélection › Tout) : evora:dirty true ; evora:request-save : un
 //     evora:save conforme (re = la demande, docRef, nom .pcraft, octets non vides d'une archive zip),
-//     puis evora:dirty false ; une seconde demande : evora:ack {ok: true, code: "clean"} ; Ctrl+S
-//     (action de l'utilisateur) : un evora:save sans re ;
+//     aucun evora:dirty false tant que la coquille n'a pas répondu (LUM-04, doc.saved-ack), puis
+//     evora:dirty false après evora:saved {ok: true} ; une seconde demande : evora:ack {ok: true,
+//     code: "clean"} ; Ctrl+S (action de l'utilisateur) : un evora:save sans re ;
+//   - accusé d'enregistrement (LUM-04) : après evora:saved {ok: false, error: "conflict"}, le
+//     document reste modifié (aucun dirty false, la demande suivante rend un evora:save) ; après un
+//     accusé positif d'un enregistrement que le document a dépassé (Ctrl+D après l'émission,
+//     révision lue par diag.stats), il reste modifié de même ; la garde beforeunload du moteur se tait
+//     sous le pont ; evora:open du même docRef remplace le document modifié (un seul accusé, positif,
+//     puis dirty false, un seul document de ce docRef, demande suivante « clean ») ;
 //   - evora:theme et evora:lang : accusés positifs, thème et langue enregistrés par le moteur, sous
 //     l'espace de noms reçu dans evora:init ;
 //   - evora:command (LUM-10) : diag.stats et diag.menus accusés avec leur résultat ; file.new,
@@ -51,6 +58,10 @@
 import zlib from 'node:zlib';
 
 export const SCENARIO = 'pont-ehp';
+// LUM-04 (e) : scénario pont-panique, joué sur le build de fumée (feature evora-smoke) et sur lui
+// seul. Le message qui fait paniquer ce build n'existe pas dans l'artefact servi.
+export const PANIC_SCENARIO = 'pont-panique';
+const PANIC_TRIGGER = 'evora:smoke-panic';
 // Référence du document ouvert par la coquille et espace de noms du compte (valeurs de banc).
 const DOC_REF = '01JZZSMKEDCQMENTREF0000001';
 const STORAGE_NS = 'ab'.repeat(32);
@@ -68,8 +79,8 @@ const CAPABILITY_NAMES = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 
   'export.drive', 'media.need', 'media.ranges', 'pick.drive', 'command', 'storage.ns', 'storage.memory',
   'storage.purge', 'live.lang', 'live.theme', 'font.inject', 'author'];
 // Capacités que ce scénario exerce : le moteur ne doit en annoncer aucune autre.
-const EXERCISED = ['doc.open', 'doc.save', 'doc.dirty', 'doc.request-save', 'storage.ns', 'storage.purge', 'live.lang', 'live.theme',
-  'command'];
+const EXERCISED = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 'doc.request-save', 'storage.ns', 'storage.purge', 'live.lang',
+  'live.theme', 'command'];
 // LUM-10 : commandes de la liste blanche du moteur qui ouvrent un dialogue, et commandes réelles du
 // moteur hors liste (sans dialogue ni effet sur le document).
 const DIALOG_COMMANDS = ['file.new', 'file.export.exportAs', 'edit.keyboardShortcuts'];
@@ -104,6 +115,11 @@ export const BANC_SABOTAGES = [
   { tag: 'ehp:opfs', kind: 'stockage', at: 'après-écriture:opfs' },
   { tag: 'ehp:command-allowed', kind: 'message' },
   { tag: 'ehp:command-refused', kind: 'message' },
+  { tag: 'ehp:saved-ack-ok', kind: 'message' },
+  { tag: 'ehp:saved-ack-conflict', kind: 'message' },
+  { tag: 'ehp:saved-ack-late-edit', kind: 'message' },
+  { tag: 'ehp:reload-same-docref', kind: 'message' },
+  { tag: 'ehp:beforeunload', kind: 'document', at: 'départ:garde' },
 ];
 // Témoin « moteur » (removeItem, clear et deleteDatabase sans effet) : les rouges attendus, chacun à
 // son contrôle. Les restes non effacés font aussi rougir les témoins de purge et la réécriture : ce
@@ -367,6 +383,8 @@ export function harnessJs() {
       const transfer = payload && payload.bytes instanceof ArrayBuffer ? [payload.bytes] : [];
       engine.contentWindow.postMessage(msg, ENGINE, transfer);
       sent.push({ id, type, v: msg.v, re: msg.re || null, via: 'parent', extraField: !!o.extraField });
+      // Repère dans le journal : ce qui précède et ce qui suit l'envoi (fenêtres de LUM-04).
+      log.push({ at: Math.round(performance.now()), bench: { id, type, re: msg.re || null } });
       return id;
     },
     witness(which, type, payload, re) {
@@ -422,6 +440,10 @@ export class EhpBench {
     this.sabotaged = [];
     this.injectedIds = [];
     this.checks = [];
+    // LUM-10 : chaque evora:command envoyé ; LUM-04 : fenêtres du journal où le document doit rester
+    // modifié (aucun evora:dirty false).
+    this.ids.commands = [];
+    this.windows = [];
   }
 
   fail(tag, text) {
@@ -606,7 +628,17 @@ export class EhpBench {
       }
       this.log(`[ehp] evora:save : ${p.name}, ${b.$arrayBuffer} octets, en-tête ${b.head}`);
     }
-    if (!(await this.until(() => this.dirtyFalseAfterSave(save), 10000))) this.fail('dirty', 'evora:dirty {dirty: false} absent après l\'enregistrement');
+    // LUM-04 : en vol jusqu'à evora:saved (aucun dirty false avant), puis enregistré.
+    if (save) {
+      await this.sabotage('saved-ack-ok', 'evora:dirty false pendant l\'enregistrement en vol',
+        `{ v: 1, type: 'evora:dirty', payload: { dirty: false, docRef: ${JSON.stringify(DOC_REF)} } }`);
+      await sleep(1500);
+      const saved = await this.saved(save.msg.id, { ok: true, version: 1 });
+      this.windows.push({ tag: 'saved-ack-ok', what: 'enregistrement en vol', from: save.msg.id, to: saved, docRef: DOC_REF });
+      if (!(await this.until(() => this.dirtyAfter(saved, false), 10000))) {
+        this.fail('saved-ack-ok', 'evora:dirty {dirty: false} absent après evora:saved {ok: true} d\'un document inchangé depuis l\'émission');
+      }
+    }
     this.ids.clean = await this.send('evora:request-save', `{ reason: 'autosave' }`);
     const cleanAck = await this.waitEngine(this.response('evora:ack', this.ids.clean), 15000);
     if (!cleanAck || cleanAck.msg.payload.ok !== true || cleanAck.msg.payload.code !== 'clean') {
@@ -619,6 +651,7 @@ export class EhpBench {
     else if ((action.msg.payload || {}).docRef !== DOC_REF || !((action.msg.payload.bytes || {}).$arrayBuffer > 0)) {
       this.fail('save-action', `evora:save de Ctrl+S inattendu : ${JSON.stringify(action.msg.payload)}`);
     }
+    if (action) await this.saved(action.msg.id, { ok: true, version: 2 });
     this.ids.theme = await this.send('evora:theme', `{ theme: 'dark', accent: '#4F46E5' }`);
     this.ids.lang = await this.send('evora:lang', `{ lang: 'de', engineLang: 'de' }`);
     for (const step of ['theme', 'lang']) {
@@ -635,8 +668,128 @@ export class EhpBench {
     this.storageLog.push({ phase: 'session', ...st });
     if (st.theme !== 'evora') this.fail('theme', `thème enregistré après evora:theme dark : ${st.theme}, attendu evora (${STORAGE_NS.slice(0, 8)}…:${PREFS})`);
     if (st.language !== 'de') this.fail('lang', `langue enregistrée après evora:lang de : ${st.language}, attendue de (${STORAGE_NS.slice(0, 8)}…:${PREFS})`);
+    await this.savedAck();
     await this.commands();
     await this.storagePhases(st);
+  }
+
+  // LUM-04 : accusé d'enregistrement (doc.saved-ack). Après un refus (conflit) et après un accusé
+  // positif d'un enregistrement que le document a dépassé, il reste modifié : aucun dirty false
+  // (jugé par verify() sur la fenêtre du journal), et la demande suivante rend un evora:save. La garde
+  // beforeunload du moteur se tait sous le pont. evora:open du même docRef remplace le document
+  // modifié (S-ACK-6). Chaque étape repart d'un document enregistré (accusé positif, cleanAfter).
+  async savedAck() {
+    const dirtyTrue = (m) => m.type === 'evora:dirty' && m.payload.docRef === DOC_REF && m.payload.dirty === true;
+    const fake = `{ v: 1, type: 'evora:dirty', payload: { dirty: false, docRef: ${JSON.stringify(DOC_REF)} } }`;
+    // Conflit : Ctrl+D (Sélection › Désélectionner) modifie le document ; l'enregistrement est refusé.
+    await this.press('d', dirtyTrue, 'evora:dirty true (Ctrl+D)');
+    const conflict = await this.requestSave('conflit');
+    if (conflict) {
+      const refused = await this.saved(conflict, { ok: false, error: 'conflict' });
+      await this.sabotage('saved-ack-conflict', 'evora:dirty false après un refus (conflit)', fake);
+      await sleep(1500);
+      const next = await this.requestSave('demande après le conflit', 'saved-ack-conflict');
+      this.windows.push({ tag: 'saved-ack-conflict', what: 'après evora:saved {ok: false, error: "conflict"}', from: refused, to: this.ids.lastRequest, docRef: DOC_REF });
+      if (next) await this.cleanAfter(next);
+    }
+    // Modification tardive : Ctrl+A, demande, Ctrl+D après l'émission (révision lue par diag.stats),
+    // puis accusé positif de l'enregistrement dépassé.
+    await this.press('a', dirtyTrue, 'evora:dirty true (Ctrl+A)');
+    const late = await this.requestSave('modification tardive');
+    if (late) {
+      const before = await this.revision();
+      let after = before;
+      for (let attempt = 1; attempt <= 3 && !(after > before); attempt++) {
+        await this.evaluate(this.frame(), shortcut('d'), true);
+        await sleep(700);
+        after = await this.revision();
+      }
+      if (!(Number.isInteger(before) && after > before)) this.fail('bench', `modification tardive non jouée : révision ${before} puis ${after} (diag.stats)`);
+      const accepted = await this.saved(late, { ok: true, version: this.nextVersion() });
+      await this.sabotage('saved-ack-late-edit', 'evora:dirty false après l\'accusé positif d\'un enregistrement dépassé', fake);
+      await sleep(1500);
+      const next = await this.requestSave('demande après l\'accusé positif dépassé', 'saved-ack-late-edit');
+      this.windows.push({ tag: 'saved-ack-late-edit', what: 'après evora:saved {ok: true} d\'un enregistrement dépassé', from: accepted, to: this.ids.lastRequest, docRef: DOC_REF });
+      if (next) await this.cleanAfter(next);
+    }
+    // Garde beforeunload, document modifié : sous le pont, le moteur ne retient pas la page.
+    await this.press('a', dirtyTrue, 'evora:dirty true (Ctrl+A)');
+    const stats = await this.stats();
+    const modified = !!stats && stats.open.some((d) => d.docRef === DOC_REF && d.dirty === true);
+    await this.sabotage('beforeunload', 'garde beforeunload posée dans le document moteur',
+      `(() => { window.__evoraGuard = (e) => e.preventDefault(); addEventListener('beforeunload', window.__evoraGuard); return true; })()`);
+    const prevented = await this.evaluate(this.frame(), `(() => { const e = new Event('beforeunload', { cancelable: true }); dispatchEvent(e); return e.defaultPrevented; })()`);
+    await this.checkpoint('départ:garde', () => {
+      if (!modified) this.fail('bench', `document non modifié (diag.stats ${JSON.stringify(stats && stats.open)}) : garde beforeunload non éprouvée`);
+      else if (prevented) this.fail('beforeunload', 'la garde beforeunload du moteur retient la page sous le pont (seconde invite après celle de la coquille)');
+    });
+    await this.restore(`(() => { removeEventListener('beforeunload', window.__evoraGuard); return true; })()`);
+    // S-ACK-6 : evora:open du même docRef, document modifié : remplacé par la version de la coquille.
+    this.ids.reload = await this.send('evora:open', `{ docRef: ${JSON.stringify(DOC_REF)}, name: 'evora-smoke.png', bytes: __ehp.png() }`);
+    const reload = await this.waitEngine((m) => m.type === 'evora:ack' && m.re === this.ids.reload && !this.injectedIds.includes(m.id), 30000);
+    await this.sabotage('reload-same-docref', 'refus fabriqué du rechargement', `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(this.ids.reload)}, payload: { ok: false, code: 'busy' } }`);
+    if (reload && reload.msg.payload.ok === true) {
+      if (!(await this.until(() => this.dirtyAfter(this.ids.reload, false), 10000))) this.fail('reload-same-docref', 'evora:dirty {dirty: false} absent après le rechargement');
+      const r = await this.stats();
+      const mine = r ? r.open.filter((d) => d.docRef === DOC_REF) : [];
+      if (mine.length !== 1 || mine[0].dirty !== false) this.fail('reload-same-docref', `après le rechargement, documents de la coquille (diag.stats) : ${JSON.stringify(r && r.open)}`);
+      const id = await this.send('evora:request-save', `{ reason: 'user', docRef: ${JSON.stringify(DOC_REF)} }`);
+      const ack = await this.waitEngine((m) => m.re === id && !this.injectedIds.includes(m.id), 15000);
+      if (!ack || ack.msg.type !== 'evora:ack' || ack.msg.payload.code !== 'clean') {
+        this.fail('reload-same-docref', `demande après le rechargement : attendu evora:ack « clean », reçu ${JSON.stringify(ack && ack.msg)}`);
+      }
+    }
+  }
+
+  // evora:request-save du document ; rend l'id de l'evora:save qui y répond, ou null. Le document
+  // doit être modifié : une autre réponse fait rougir `tag` (sinon : banc inopérant).
+  async requestSave(what, tag) {
+    const id = await this.send('evora:request-save', `{ reason: 'user', docRef: ${JSON.stringify(DOC_REF)} }`);
+    this.ids.lastRequest = id;
+    const r = await this.waitEngine((m) => m.re === id && !this.injectedIds.includes(m.id), 15000);
+    if (r && r.msg.type === 'evora:save') return r.msg.id;
+    this.fail(tag || 'bench', `${what} : evora:request-save d'un document modifié, attendu un evora:save, reçu ${JSON.stringify(r && r.msg)}`);
+    return null;
+  }
+
+  // Accusé positif d'un enregistrement ; l'état enregistré qui suit est attendu, non jugé ici.
+  async cleanAfter(saveId) {
+    const sent = await this.saved(saveId, { ok: true, version: this.nextVersion() });
+    if (!(await this.until(() => this.dirtyAfter(sent, false), 10000))) this.log('[ehp] état enregistré non revu après un accusé positif');
+  }
+
+  nextVersion() {
+    this.version = (this.version || 10) + 1;
+    return this.version;
+  }
+
+  // Résultat de diag.stats (LUM-10), ou null.
+  async stats() {
+    const ack = await this.command('diag.stats');
+    const r = ack && ack.ok === true ? ack.result : null;
+    return r && Number.isInteger(r.dialogs) && Array.isArray(r.open) ? r : null;
+  }
+
+  // Révision du document de la coquille (diag.stats), ou null.
+  async revision() {
+    const r = await this.stats();
+    const d = r && r.open.find((x) => x.docRef === DOC_REF);
+    return d ? d.revision : null;
+  }
+
+  // Scénario pont-panique (build de fumée) : sur demande de la coquille admise, le moteur panique ; le
+  // crochet de LUM-04 doit envoyer un seul evora:failed {code: "panic"}. `onTrigger` est appelé juste
+  // avant la demande (les erreurs de page qui suivent sont celles de la panique).
+  async panic(onTrigger) {
+    this.panicMode = true;
+    await this.refresh();
+    const early = this.engineMessages().filter((e) => e.msg.type === 'evora:failed');
+    if (early.length) this.fail('panique', `evora:failed avant la demande de panique : ${early.map((e) => e.msg.id).join(', ')}`);
+    onTrigger();
+    this.ids.panic = await this.send(PANIC_TRIGGER, '{}');
+    const failed = await this.waitEngine((m) => m.type === 'evora:failed', 15000);
+    if (!failed) this.fail('panique', 'aucun evora:failed après la demande de panique');
+    await sleep(2000);
   }
 
   // LUM-10 : evora:command. Chaque commande de la liste blanche est accusée positivement (diag.* avec
@@ -644,7 +797,6 @@ export class EhpBench {
   // se referme sur Échap. Une commande hors liste est refusée sans effet. Les accusés sont jugés dans
   // verify() : un seul par commande, conforme.
   async commands() {
-    this.ids.commands = [];
     const stats = async () => {
       const ack = await this.command('diag.stats');
       const r = ack && ack.ok === true ? ack.result : null;
@@ -857,12 +1009,22 @@ export class EhpBench {
     await untouched(later, 'après une écriture tentée', 'après-écriture');
   }
 
-  // Le dernier evora:dirty du document, après l'evora:save de la demande, vaut false.
-  dirtyFalseAfterSave(save) {
-    if (!save) return false;
-    const msgs = this.engineMessages();
-    const at = msgs.findIndex((e) => e.msg.id === save.msg.id);
-    return msgs.slice(at + 1).some((e) => e.msg.type === 'evora:dirty' && e.msg.payload.dirty === false);
+  // Position d'un message du moteur ou d'un envoi du banc dans le journal (-1 : absent).
+  logIndex(id) {
+    return this.state.log.findIndex((e) => (e.msg && e.msg.id === id) || (e.bench && e.bench.id === id));
+  }
+
+  // Un evora:dirty {dirty} du document, venu du moteur après l'envoi `marker` du banc (jamais un
+  // message fabriqué par le témoin « banc »).
+  dirtyAfter(marker, dirty, docRef = DOC_REF) {
+    const at = this.logIndex(marker);
+    return at >= 0 && this.state.log.slice(at + 1).some((e) => e.fromEngine && e.plain && e.msg.type === 'evora:dirty'
+      && e.msg.payload && e.msg.payload.dirty === dirty && e.msg.payload.docRef === docRef && !this.injectedIds.includes(e.msg.id));
+  }
+
+  // evora:saved en réponse à l'evora:save `re` ; rend l'id de l'envoi.
+  async saved(re, payload) {
+    return this.send('evora:saved', JSON.stringify(payload), { re });
   }
 
   // Conformité de chaque enveloppe reçue du moteur, et des réponses.
@@ -908,6 +1070,10 @@ export class EhpBench {
           break;
         }
         case 'evora:failed':
+          if (this.panicMode) {
+            if (m.re !== undefined || !only(['code']) || p.code !== 'panic') this.fail('panique', `evora:failed non conforme à la panique : ${where}`);
+            break;
+          }
           this.fail('failed', `le moteur a signalé un échec : ${where}`);
           if (!only(['code']) || !FAIL_CODES.includes(p.code)) this.fail('envelope', `evora:failed non conforme : ${where}`);
           break;
@@ -927,6 +1093,30 @@ export class EhpBench {
       ['purgeForeign', 'answer-foreign', 'un evora:purge d\'une origine non admise'],
       ['purgeSibling', 'answer-source', 'un evora:purge de l\'origine admise venu d\'une autre fenêtre']]) {
       if (this.ids[key] && answered(this.ids[key]).length) this.fail(tag, `le moteur a répondu à ${label} : ${JSON.stringify(answered(this.ids[key])[0].msg)}`);
+    }
+    // LUM-04 (e) : une panique, un seul evora:failed.
+    if (this.panicMode) {
+      const failures = msgs.filter((e) => e.msg && e.msg.type === 'evora:failed');
+      if (failures.length !== 1) this.fail('panique', `evora:failed reçu ${failures.length} fois (attendu : 1), ids ${failures.map((e) => e.msg.id).join(', ') || 'aucun'}`);
+    }
+    // LUM-04 (b, l.480) : aucun evora:dirty {dirty: false} du document dans les fenêtres où il doit
+    // rester modifié (enregistrement en vol, après un refus, après un accusé positif dépassé).
+    for (const w of this.windows) {
+      const from = this.logIndex(w.from);
+      if (from < 0) continue;
+      const to = w.to ? this.logIndex(w.to) : -1;
+      const wrong = this.state.log.slice(from + 1, to < 0 ? undefined : to).filter((e) => e.fromEngine && e.plain && e.msg.type === 'evora:dirty'
+        && e.msg.payload && e.msg.payload.dirty === false && e.msg.payload.docRef === w.docRef);
+      if (wrong.length) this.fail(w.tag, `${w.what} : evora:dirty {dirty: false} reçu (${wrong.map((e) => e.msg.id).join(', ')})`);
+    }
+    // LUM-04 (d, S-ACK-6) : un seul accusé, positif, du rechargement du même docRef.
+    if (this.ids.reload) {
+      const rs = answered(this.ids.reload);
+      const bad = rs.filter((e) => e.msg.type !== 'evora:ack' || !e.msg.payload || e.msg.payload.ok !== true);
+      if (rs.length !== 1 || bad.length) {
+        this.fail('reload-same-docref', `evora:open du même docRef (id ${this.ids.reload}) : ${rs.length} réponse(s) [${rs.map((e) => e.msg.id).join(', ')}], `
+          + `non conformes : ${bad.map((e) => `${e.msg.id} ${JSON.stringify(e.msg.payload)}`).join(' | ') || 'aucune'}`);
+      }
     }
     // LUM-10 : un seul accusé par evora:command, conforme (commandAnswered) ; chaque réponse citée.
     for (const c of this.ids.commands || []) {

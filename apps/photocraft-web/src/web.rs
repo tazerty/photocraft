@@ -148,6 +148,11 @@ pub fn start() {
                     {
                         log::warn!("photocraft-web: host language {code} not applied: {e}");
                     }
+                    // Evora build (patch LUM-10): the renderer, reported by `diag.stats`.
+                    let renderer = match (&cc.wgpu_render_state, force_cpu) {
+                        (Some(rs), false) => format!("{:?}", rs.adapter.get_info().backend),
+                        _ => "cpu".to_owned(),
+                    };
                     if let Some(rs) = cc.wgpu_render_state.clone()
                         && !force_cpu
                     {
@@ -159,7 +164,7 @@ pub fn start() {
                     // Evora build (patch E4): the host's requests reach the app between frames.
                     let host = shell_bridge.map(|bridge| {
                         bridge.attach(cc.egui_ctx.clone());
-                        crate::host_docs::HostDocs::new(bridge)
+                        crate::host_docs::HostDocs::new(bridge, renderer)
                     });
                     Ok(Box::new(WebShell { app, inbox, place_inbox, unsaved, served, database, presets, host }))
                 }),

@@ -32,6 +32,9 @@ mod storage_ns;
 mod ehp;
 #[cfg(target_arch = "wasm32")]
 mod host_docs;
+// Evora build (patch LUM-10): the commands the host may run (`evora:command`).
+#[cfg(target_arch = "wasm32")]
+mod host_commands;
 
 #[cfg(target_arch = "wasm32")]
 mod web;

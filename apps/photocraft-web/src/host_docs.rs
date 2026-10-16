@@ -11,12 +11,34 @@
 //! Without `doc.saved-ack`, the engine counts a document saved once handed over; the host keeps its
 //! own save state (HOST-PROTOCOL §6.3). Save As keeps the host's document (no new `docRef` can be
 //! adopted without `evora:saved`), so it is refused like any write outside the host's documents.
+//!
+//! Patch LUM-04, when `doc.saved-ack` is effective (HOST-PROTOCOL §4.3, §4.5): a document is saved
+//! only once the host answers `evora:saved {ok: true}`. The engine marks it saved as it hands the
+//! bytes over; at the end of that frame the save is bound to its document with the revision it
+//! wrote (its token), and the document goes back to its state before the save (still modified),
+//! so no `evora:dirty {dirty: false}` leaves while the save is in flight. `ok: true` then marks it
+//! saved at that revision, which leaves it modified when it changed since (§4.5); `ok: false`
+//! keeps it, or makes it, modified. The state is reported again after each answer.
+//! `evora:open` of a `docRef` already open replaces its content with the host's version (the
+//! engine's changes are dropped, without a prompt), as the host's « reload the server version »
+//! does after a conflict (§6.2).
 
+use photocraft_doc::DocId;
 use photocraft_ui_egui::PhotocraftApp;
 use photocraft_ui_egui::theme::ThemeKind;
 use serde_json::json;
 
 use crate::ehp::{Bridge, HostEvent};
+
+/// A save handed to the host and waiting for `evora:saved` (patch LUM-04).
+struct Pending {
+    /// The `evora:save` id the answer carries in `re`.
+    id: String,
+    /// The document saved (an id, not an index: tabs move and close meanwhile).
+    doc: DocId,
+    /// The revision the bytes were written from.
+    token: u64,
+}
 
 /// Where the host's documents live: `evora/<docRef>/<name>.pcraft`.
 const HOST_DIR: &str = "evora";
@@ -72,15 +94,24 @@ pub struct HostDocs {
     reported: Vec<(String, bool)>,
     /// The renderer the engine started with (`diag.stats`, patch LUM-10).
     renderer: String,
+    /// Saves waiting for `evora:saved` (patch LUM-04).
+    pending: Vec<Pending>,
+    /// Each open document's saved revision at the end of the last frame: the state a save made
+    /// in this frame goes back to until the host answers.
+    saved_before: Vec<(DocId, u64)>,
+    /// `docRef`s whose state is reported again at the end of this frame, changed or not.
+    forced: Vec<String>,
 }
 
 impl HostDocs {
     pub fn new(bridge: Bridge, renderer: String) -> Self {
-        HostDocs { bridge, opened: Vec::new(), reported: Vec::new(), renderer }
+        HostDocs { bridge, opened: Vec::new(), reported: Vec::new(), renderer, pending: Vec::new(), saved_before: Vec::new(), forced: Vec::new() }
     }
 
     /// At the start of a frame: what the host asked.
     pub fn apply(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context) {
+        // A save is always bound before its answer is read, even after a frame without `ui`.
+        self.bind_saves(app);
         for event in self.bridge.take_events() {
             match event {
                 HostEvent::Open { id, doc_ref, name, bytes } => self.open(app, &id, doc_ref, &name, &bytes),
@@ -100,7 +131,43 @@ impl HostDocs {
                     }
                 }
                 HostEvent::Command { id, command } => self.command(app, ctx, &id, &command),
+                HostEvent::Saved { re, ok } => self.saved(app, &re, ok),
             }
+        }
+    }
+
+    /// `evora:saved` for a save in flight (patch LUM-04, HOST-PROTOCOL §4.3 and §4.5). `ok: true`
+    /// marks the document saved at the revision written, so it stays modified when it changed
+    /// since; `ok: false` keeps it, or makes it, modified. Its state is reported again either way.
+    fn saved(&mut self, app: &mut PhotocraftApp, re: &str, ok: bool) {
+        let Some(at) = self.pending.iter().position(|p| p.id == re) else { return };
+        let pending = self.pending.remove(at);
+        // A document closed or replaced meanwhile: the answer no longer applies.
+        let Some(index) = app.session.documents().iter().position(|d| d.doc.id == pending.doc) else { return };
+        with_document(app, index, |st| {
+            if ok {
+                if pending.token > st.saved_revision {
+                    st.saved_revision = pending.token;
+                }
+            } else if !st.is_dirty() {
+                // No revision is ever 0: the document reads modified until a save succeeds.
+                st.saved_revision = 0;
+            }
+        });
+        if let Some(doc_ref) = self.doc_ref_at(app, index) {
+            self.force(&doc_ref);
+        }
+    }
+
+    /// The host's `docRef` of the document at `index`, if it is one of the host's.
+    fn doc_ref_at(&self, app: &PhotocraftApp, index: usize) -> Option<String> {
+        self.opened.iter().find(|r| index_of(app, r) == Some(index)).cloned()
+    }
+
+    /// Report the state of `doc_ref` again at the end of this frame.
+    fn force(&mut self, doc_ref: &str) {
+        if !self.forced.iter().any(|r| r == doc_ref) {
+            self.forced.push(doc_ref.to_owned());
         }
     }
 
@@ -121,15 +188,23 @@ impl HostDocs {
     }
 
     /// At the end of a frame: `evora:dirty` for each host document whose state changed.
-    pub fn report(&mut self, app: &PhotocraftApp) {
-        let states: Vec<(String, bool)> = self
+    /// Also, first, the saves made in this frame are bound to their documents (patch LUM-04);
+    /// no `dirty: false` leaves for a document whose save is in flight; a state the host must hear
+    /// again (after `evora:saved`, after an open) is reported even when unchanged.
+    pub fn report(&mut self, app: &mut PhotocraftApp) {
+        self.bind_saves(app);
+        let states: Vec<(String, DocId, bool)> = self
             .opened
             .iter()
-            .filter_map(|r| index_of(app, r).and_then(|i| app.session.documents().get(i)).map(|d| (r.clone(), d.is_dirty())))
+            .filter_map(|r| index_of(app, r).and_then(|i| app.session.documents().get(i)).map(|d| (r.clone(), d.doc.id, d.is_dirty())))
             .collect();
-        for (doc_ref, dirty) in states {
+        for (doc_ref, doc, dirty) in states {
+            if !dirty && self.pending.iter().any(|p| p.doc == doc) {
+                continue;
+            }
+            let forced = self.forced.iter().any(|r| *r == doc_ref);
             match self.reported.iter().position(|(r, _)| *r == doc_ref) {
-                Some(i) if self.reported.get(i).is_some_and(|(_, last)| *last == dirty) => {}
+                Some(i) if !forced && self.reported.get(i).is_some_and(|(_, last)| *last == dirty) => {}
                 Some(i) => {
                     if let Some(entry) = self.reported.get_mut(i) {
                         entry.1 = dirty;
@@ -142,15 +217,36 @@ impl HostDocs {
                 }
             }
         }
+        self.forced.clear();
+        self.saved_before = app.session.documents().iter().map(|d| (d.doc.id, d.saved_revision)).collect();
+    }
+
+    /// Bind each save handed to the host in this frame to its document (patch LUM-04): the save
+    /// records the revision it wrote, and the document goes back to its saved revision of the last
+    /// frame, so it reads modified until the host answers. Without `doc.saved-ack` effective, the
+    /// engine keeps counting a document saved once handed over (HOST-PROTOCOL §6.3).
+    fn bind_saves(&mut self, app: &mut PhotocraftApp) {
+        let sent = self.bridge.take_sent();
+        if !self.bridge.has("doc.saved-ack") {
+            return;
+        }
+        for (id, doc_ref) in sent {
+            let Some(index) = index_of(app, &doc_ref) else { continue };
+            let Some((doc, token)) = app.session.documents().get(index).map(|d| (d.doc.id, d.saved_revision)) else { continue };
+            let before = self.saved_before.iter().find(|(d, _)| *d == doc).map(|(_, r)| *r);
+            if let Some(before) = before
+                && before != token
+            {
+                with_document(app, index, |st| st.saved_revision = before);
+            }
+            self.pending.push(Pending { id, doc, token });
+        }
     }
 
     fn open(&mut self, app: &mut PhotocraftApp, id: &str, doc_ref: String, name: &str, bytes: &[u8]) {
-        if index_of(app, &doc_ref).is_some() {
-            // The same docRef twice: a single document per reference.
-            self.bridge.ack(id, false, Some("busy"));
-            return;
-        }
-        let before: Vec<photocraft_doc::DocId> = app.session.documents().iter().map(|d| d.doc.id).collect();
+        // The same docRef again: the host's version replaces the engine's (patch LUM-04).
+        let replaced = index_of(app, &doc_ref);
+        let before: Vec<DocId> = app.session.documents().iter().map(|d| d.doc.id).collect();
         if let Err(e) = app.open_bytes(name, bytes) {
             log::warn!("photocraft-web: the host's document could not be opened: {e}");
             self.bridge.ack(id, false, Some("invalid_content"));
@@ -162,12 +258,40 @@ impl HostDocs {
             self.bridge.ack(id, false, Some("unsupported"));
             return;
         };
-        app.session.set_active(*index);
+        let mut index = *index;
+        if let Some(old) = replaced {
+            let Some(index_now) = self.replace(app, old, index) else {
+                self.bridge.ack(id, false, Some("busy"));
+                return;
+            };
+            index = index_now;
+        }
+        app.session.set_active(index);
         if let Some(st) = app.session.active_mut() {
             st.path = Some(host_path(&doc_ref, name));
         }
-        self.opened.push(doc_ref);
+        if !self.opened.contains(&doc_ref) {
+            self.opened.push(doc_ref.clone());
+        }
+        // Its state follows the acknowledgement: `dirty: false` (HOST-PROTOCOL §7.1, step 8).
+        self.force(&doc_ref);
         self.bridge.ack(id, true, None);
+    }
+
+    /// The document just opened at `new` takes the place of the one at `old`, which closes without
+    /// a prompt: its changes are dropped and its saves in flight no longer apply. Returns the new
+    /// document's index; `None` (the new document closed again) when the old one would not close.
+    fn replace(&mut self, app: &mut PhotocraftApp, old: usize, new: usize) -> Option<usize> {
+        let old_doc = app.session.documents().get(old).map(|d| d.doc.id);
+        let new_doc = app.session.documents().get(new).map(|d| d.doc.id)?;
+        if let Err(e) = app.run("file.close", json!({"document": old})) {
+            log::warn!("photocraft-web: the replaced document could not be closed: {e}");
+            let _ = app.run("file.close", json!({"document": new}));
+            return None;
+        }
+        self.pending.retain(|p| Some(p.doc) != old_doc);
+        let now = app.session.documents().iter().position(|d| d.doc.id == new_doc)?;
+        Some(app.session.move_document(now, old).unwrap_or(now))
     }
 
     fn request_save(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, doc_ref: Option<String>) {
@@ -204,6 +328,20 @@ impl HostDocs {
             }
             self.bridge.ack(id, false, Some("busy"));
         }
+    }
+}
+
+/// Run `f` on the document at `index`, the active document left as it was.
+fn with_document(app: &mut PhotocraftApp, index: usize, f: impl FnOnce(&mut photocraft_engine::DocState)) {
+    let previous = app.session.active_index();
+    if !app.session.set_active(index) {
+        return;
+    }
+    if let Some(st) = app.session.active_mut() {
+        f(st);
+    }
+    if let Some(previous) = previous {
+        app.session.set_active(previous);
     }
 }
 

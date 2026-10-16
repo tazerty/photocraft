@@ -70,11 +70,13 @@ pub struct HostDocs {
     opened: Vec<String>,
     /// The dirty state last reported for each of them.
     reported: Vec<(String, bool)>,
+    /// The renderer the engine started with (`diag.stats`, patch LUM-10).
+    renderer: String,
 }
 
 impl HostDocs {
-    pub fn new(bridge: Bridge) -> Self {
-        HostDocs { bridge, opened: Vec::new(), reported: Vec::new() }
+    pub fn new(bridge: Bridge, renderer: String) -> Self {
+        HostDocs { bridge, opened: Vec::new(), reported: Vec::new(), renderer }
     }
 
     /// At the start of a frame: what the host asked.
@@ -97,7 +99,24 @@ impl HostDocs {
                         }
                     }
                 }
+                HostEvent::Command { id, command } => self.command(app, ctx, &id, &command),
             }
+        }
+    }
+
+    /// `evora:command` of the compiled list (patch LUM-10): `diag.*` answered with their result,
+    /// an engine command run as its menu item runs it.
+    fn command(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, command: &str) {
+        match command {
+            "diag.stats" => {
+                let host: Vec<(String, usize)> = self.opened.iter().filter_map(|r| index_of(app, r).map(|i| (r.clone(), i))).collect();
+                self.bridge.ack_result(id, &crate::host_commands::stats(app, &host, &self.renderer));
+            }
+            "diag.menus" => self.bridge.ack_result(id, &crate::host_commands::menus(app)),
+            _ => match crate::host_commands::run_engine(app, ctx, command) {
+                Ok(()) => self.bridge.ack(id, true, None),
+                Err(code) => self.bridge.ack(id, false, Some(code)),
+            },
         }
     }
 

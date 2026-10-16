@@ -17,6 +17,10 @@
 //     (action de l'utilisateur) : un evora:save sans re ;
 //   - evora:theme et evora:lang : accusés positifs, thème et langue enregistrés par le moteur, sous
 //     l'espace de noms reçu dans evora:init ;
+//   - evora:command (LUM-10) : diag.stats et diag.menus accusés avec leur résultat ; file.new,
+//     file.export.exportAs et edit.keyboardShortcuts accusés positivement, chacun ouvrant un
+//     dialogue du moteur (compté par diag.stats) que la touche Échap referme ; view.zoomIn et
+//     file.exit, hors liste, refusés (code capability) sans effet ; un seul accusé par commande ;
 //   - stockage (E5 corrigé) : restes posés avant le démarrage (autre compte, noms nus de l'amont)
 //     purgés à l'init, noms d'un autre moteur de la même origine conservés ; tout le stockage du
 //     moteur sous <storageNs>: (marqueur de base <storageNs>:photocraft.presets compris, aucun
@@ -64,7 +68,12 @@ const CAPABILITY_NAMES = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 
   'export.drive', 'media.need', 'media.ranges', 'pick.drive', 'command', 'storage.ns', 'storage.memory',
   'storage.purge', 'live.lang', 'live.theme', 'font.inject', 'author'];
 // Capacités que ce scénario exerce : le moteur ne doit en annoncer aucune autre.
-const EXERCISED = ['doc.open', 'doc.save', 'doc.dirty', 'doc.request-save', 'storage.ns', 'storage.purge', 'live.lang', 'live.theme'];
+const EXERCISED = ['doc.open', 'doc.save', 'doc.dirty', 'doc.request-save', 'storage.ns', 'storage.purge', 'live.lang', 'live.theme',
+  'command'];
+// LUM-10 : commandes de la liste blanche du moteur qui ouvrent un dialogue, et commandes réelles du
+// moteur hors liste (sans dialogue ni effet sur le document).
+const DIALOG_COMMANDS = ['file.new', 'file.export.exportAs', 'edit.keyboardShortcuts'];
+const REFUSED_COMMANDS = ['view.zoomIn', 'file.exit'];
 const ACK_CODES = ['clean', 'cancelled', 'conflict', 'too_large', 'quota', 'forbidden', 'not_found', 'invalid_content',
   'unsupported', 'rate_limited', 'read_only', 'busy', 'capability', 'network', 'server', 'timeout'];
 const FAIL_CODES = ['no_webgl2', 'wasm', 'memory', 'panic', 'unsupported_browser', 'protocol', 'init'];
@@ -93,6 +102,8 @@ export const BANC_SABOTAGES = [
   { tag: 'ehp:session-storage', kind: 'stockage', at: 'après-écriture:session' },
   { tag: 'ehp:caches', kind: 'stockage', at: 'après-écriture:caches' },
   { tag: 'ehp:opfs', kind: 'stockage', at: 'après-écriture:opfs' },
+  { tag: 'ehp:command-allowed', kind: 'message' },
+  { tag: 'ehp:command-refused', kind: 'message' },
 ];
 // Témoin « moteur » (removeItem, clear et deleteDatabase sans effet) : les rouges attendus, chacun à
 // son contrôle. Les restes non effacés font aussi rougir les témoins de purge et la réécriture : ce
@@ -382,6 +393,17 @@ const shortcut = (key) => `(() => {
   return document.activeElement === c;
 })()`;
 
+// Une touche nommée (Échap, Entrée) vers le canvas d'eframe, avec ses modificateurs.
+const keyPress = (key, code, mods = {}) => `(() => {
+  const c = document.getElementById('photocraft_canvas');
+  c.focus();
+  const init = { key: ${JSON.stringify(key)}, code: ${JSON.stringify(code)}, ctrlKey: ${!!mods.ctrl}, shiftKey: ${!!mods.shift},
+    altKey: ${!!mods.alt}, bubbles: true, cancelable: true };
+  c.dispatchEvent(new KeyboardEvent('keydown', init));
+  c.dispatchEvent(new KeyboardEvent('keyup', init));
+  return document.activeElement === c;
+})()`;
+
 function initPayload(capabilities) {
   return { lang: 'fr', engineLang: 'fr', theme: 'light', accent: '#4F46E5', readOnly: false, storageNs: STORAGE_NS,
     capabilities, prefs: {}, limits: { maxDocumentBytes: BENCH_MAX_BYTES, maxExportBytes: BENCH_MAX_BYTES } };
@@ -510,6 +532,7 @@ export class EhpBench {
     }
     this.ids.ready = ready.msg.id;
     this.readyCaps = (ready.msg.payload && ready.msg.payload.capabilities) || [];
+    this.readyVersion = ready.msg.payload && ready.msg.payload.version;
     this.log(`[ehp] evora:ready ${JSON.stringify(ready.msg.payload)}`);
     const init = JSON.stringify(initPayload(this.readyCaps));
     // Témoins, avant le vrai evora:init : un moteur qui en accepterait un serait déjà initialisé.
@@ -612,7 +635,87 @@ export class EhpBench {
     this.storageLog.push({ phase: 'session', ...st });
     if (st.theme !== 'evora') this.fail('theme', `thème enregistré après evora:theme dark : ${st.theme}, attendu evora (${STORAGE_NS.slice(0, 8)}…:${PREFS})`);
     if (st.language !== 'de') this.fail('lang', `langue enregistrée après evora:lang de : ${st.language}, attendue de (${STORAGE_NS.slice(0, 8)}…:${PREFS})`);
+    await this.commands();
     await this.storagePhases(st);
+  }
+
+  // LUM-10 : evora:command. Chaque commande de la liste blanche est accusée positivement (diag.* avec
+  // leur résultat) et produit son effet : un dialogue du moteur s'ouvre (compté par diag.stats), puis
+  // se referme sur Échap. Une commande hors liste est refusée sans effet. Les accusés sont jugés dans
+  // verify() : un seul par commande, conforme.
+  async commands() {
+    this.ids.commands = [];
+    const stats = async () => {
+      const ack = await this.command('diag.stats');
+      const r = ack && ack.ok === true ? ack.result : null;
+      return r && Number.isInteger(r.dialogs) ? r : null;
+    };
+    const first = await stats();
+    if (!first) {
+      this.fail('command-allowed', 'diag.stats sans résultat exploitable : effets des commandes non vérifiables');
+      return;
+    }
+    await this.command('diag.menus');
+    for (const command of DIALOG_COMMANDS) {
+      const ack = await this.command(command);
+      // Accusé absent ou négatif : verify() le dit.
+      if (!ack || ack.ok !== true) continue;
+      if (!(await this.dialogsReach(first.dialogs + 1, stats, 8000))) {
+        this.fail('command-allowed', `${command} accusé sans qu'un dialogue s'ouvre dans le moteur`);
+        continue;
+      }
+      let closed = false;
+      for (let attempt = 1; attempt <= 3 && !closed; attempt++) {
+        await this.evaluate(this.frame(), keyPress('Escape', 'Escape'), true);
+        closed = await this.dialogsReach(first.dialogs, stats, 3000);
+      }
+      if (!closed) this.fail('command-allowed', `le dialogue ouvert par ${command} ne s'est pas refermé sur Échap`);
+    }
+    for (const command of REFUSED_COMMANDS) await this.command(command, true);
+    const after = await stats();
+    if (!after || after.dialogs !== first.dialogs) this.fail('command-refused', `dialogues après les commandes hors liste : ${JSON.stringify(after)}`);
+    const stat = this.ids.commands.find((c) => c.command === 'diag.stats');
+    const refused = this.ids.commands.find((c) => c.refused);
+    await this.sabotage('command-allowed', 'refus fabriqué de diag.stats', `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(stat.id)}, payload: { ok: false, code: 'capability' } }`);
+    await this.sabotage('command-refused', 'accusé positif fabriqué d\'une commande hors liste', `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(refused.id)}, payload: { ok: true } }`);
+  }
+
+  // Un evora:command, journalisé pour verify() ; rend la charge utile de la réponse du moteur (jamais
+  // celle d'un message fabriqué par le témoin « banc »).
+  async command(command, refused = false) {
+    const id = await this.send('evora:command', `{ command: ${JSON.stringify(command)}, params: {} }`);
+    this.ids.commands.push({ id, command, refused });
+    const ack = await this.waitEngine((m) => m.type === 'evora:ack' && m.re === id && !this.injectedIds.includes(m.id), 15000);
+    return ack ? ack.msg.payload : null;
+  }
+
+  // Le moteur compte-t-il n dialogues ouverts (diag.stats), au plus ms millisecondes ?
+  async dialogsReach(n, stats, ms) {
+    const end = Date.now() + ms;
+    for (;;) {
+      const r = await stats();
+      if (r && r.dialogs === n) return true;
+      if (Date.now() > end) return false;
+      await sleep(300);
+    }
+  }
+
+  // Réponse conforme à un evora:command : refus `capability` hors liste ; accusé positif sinon, avec
+  // le résultat attendu pour diag.stats et diag.menus, sans résultat pour une commande du moteur.
+  commandAnswered(c, p) {
+    if (c.refused) return p.ok === false && p.code === 'capability' && p.result === undefined;
+    if (p.ok !== true || p.code !== undefined) return false;
+    const r = p.result;
+    if (c.command === 'diag.stats') {
+      return !!r && r.version === this.readyVersion && typeof r.renderer === 'string' && r.renderer.length > 0 && r.wasmMemoryBytes > 0
+        && Number.isInteger(r.documents) && r.documents >= 1 && Number.isInteger(r.dialogs) && r.dialogs >= 0 && Array.isArray(r.open)
+        && r.open.length >= 1 && r.open.every((d) => ULID_RE.test(d.docRef) && typeof d.dirty === 'boolean' && Number.isInteger(d.revision));
+    }
+    if (c.command === 'diag.menus') {
+      return !!r && Array.isArray(r.live) && Array.isArray(r.enabled) && DIALOG_COMMANDS.every((x) => r.live.includes(x))
+        && r.enabled.every((x) => r.live.includes(x));
+    }
+    return r === undefined;
   }
 
   async storage() {
@@ -824,6 +927,15 @@ export class EhpBench {
       ['purgeForeign', 'answer-foreign', 'un evora:purge d\'une origine non admise'],
       ['purgeSibling', 'answer-source', 'un evora:purge de l\'origine admise venu d\'une autre fenêtre']]) {
       if (this.ids[key] && answered(this.ids[key]).length) this.fail(tag, `le moteur a répondu à ${label} : ${JSON.stringify(answered(this.ids[key])[0].msg)}`);
+    }
+    // LUM-10 : un seul accusé par evora:command, conforme (commandAnswered) ; chaque réponse citée.
+    for (const c of this.ids.commands || []) {
+      const rs = answered(c.id);
+      const bad = rs.filter((e) => !this.commandAnswered(c, e.msg.payload || {}));
+      if (rs.length !== 1 || bad.length) {
+        this.fail(c.refused ? 'command-refused' : 'command-allowed', `evora:command ${c.command} (id ${c.id}) : ${rs.length} réponse(s) `
+          + `[${rs.map((e) => e.msg.id).join(', ')}], non conformes : ${bad.map((e) => `${e.msg.id} ${JSON.stringify(e.msg.payload).slice(0, 160)}`).join(' | ') || 'aucune'}`);
+      }
     }
     const announced = this.readyCaps;
     const extra = announced.filter((x) => !EXERCISED.includes(x));

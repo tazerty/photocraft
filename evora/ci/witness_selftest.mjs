@@ -5,9 +5,10 @@
 // Un témoin dont le verdict ne sait pas dire INVALIDE ne prouve rien : chaque façon de mentir
 // (rouge manquant, rouge crédité par le sabotage d'un autre, débordement sur un contrôle non visé,
 // problème hors banc, inventaire incomplet ou rejoué, moteur non démarré, rouge au mauvais contrôle)
-// est fabriquée ici et doit rendre INVALIDE ; les trois témoins sains doivent rendre VALIDE. Le
-// constat du pont muet (muteProblems) est éprouvé de même, cas sain et chaque défaut.
-import { BANC_SABOTAGES, MOTEUR_REDS, MUET_REDS, muteProblems, tagOf, witness } from './smoke_ehp.mjs';
+// est fabriquée ici et doit rendre INVALIDE ; les quatre témoins sains doivent rendre VALIDE (le
+// quatrième, « ecoutes », est celui du scénario pont-documents, smoke_docs.mjs). Le constat du pont
+// muet (muteProblems) est éprouvé de même, cas sain et chaque défaut.
+import { BANC_SABOTAGES, DOCS_REDS, MOTEUR_REDS, MUET_REDS, muteProblems, tagOf, witness } from './smoke_ehp.mjs';
 
 // Contrôles nommés du banc (storagePhases) qu'aucun témoin ne vise : ils doivent rester verts.
 const QUIET_CHECKS = ['init:banc', 'init:opfs', 'init:caches', 'init:session', 'blocage:banc', 'après-accusé:accusé',
@@ -32,6 +33,13 @@ function moteur() {
 
 function muet() {
   return { mode: 'muet', problems: MUET_REDS.map((s) => `[${s.tag}] rouge`), sabotaged: [], checks: [], started: false };
+}
+
+// Contrôles du scénario pont-documents qu'aucun rouge du témoin « ecoutes » ne vise.
+const DOCS_QUIET = ['depart:banc', 'a:banc', 'b-init:propre', 'deux:banc'];
+function ecoutes() {
+  const checks = [...DOCS_REDS.map((s) => ({ label: s.at, tags: [s.tag] })), ...DOCS_QUIET.map((label) => ({ label, tags: [] }))];
+  return { mode: 'ecoutes', problems: DOCS_REDS.map((s) => `[${s.tag}] rouge à ${s.at}`), sabotaged: [], checks, started: true };
 }
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -78,6 +86,26 @@ const cases = [
   ['muet sain', muet(), true],
   ['muet : rouge hors attente', ((c) => { c.problems.push('[muet:demarrage] démarré'); return c; })(muet()), false],
   ['muet : un rouge attendu manque', ((c) => { c.problems.shift(); return c; })(muet()), false],
+  ['ecoutes sain', ecoutes(), true],
+  // Le même détecteur rougit à deux contrôles : un seul vert suffit à invalider.
+  ['ecoutes : une réécriture attendue reste verte', ((c) => {
+    c.checks.find((k) => k.label === 'deux-ecriture:cle').tags = [];
+    return c;
+  })(ecoutes()), false],
+  ['ecoutes : un détecteur attendu manque', ((c) => { c.problems = c.problems.filter((p) => tagOf(p) !== 'docs:purge-accuse'); return c; })(ecoutes()), false],
+  ['ecoutes : rouge au mauvais contrôle', ((c) => {
+    c.checks.find((k) => k.label === 'b-init:base').tags = [];
+    c.checks.find((k) => k.label === 'b-init:propre').tags = ['docs:base'];
+    return c;
+  })(ecoutes()), false],
+  ['ecoutes : contrôle non visé rougi', ((c) => {
+    c.checks.find((k) => k.label === 'a:banc').tags = ['docs:bench'];
+    c.problems.push('[docs:bench] scénario sans objet');
+    return c;
+  })(ecoutes()), false],
+  ['ecoutes : problème hors banc', ((c) => { c.problems.push('un : console.error panne'); return c; })(ecoutes()), false],
+  ['ecoutes : scénario inachevé', ((c) => { c.started = false; return c; })(ecoutes()), false],
+  ['ecoutes : sabotage du banc joué', ((c) => { c.sabotaged = [banc().sabotaged[0]]; return c; })(ecoutes()), false],
 ];
 
 let failures = 0;

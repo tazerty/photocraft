@@ -525,8 +525,9 @@ impl Bridge {
             return;
         }
         self.0.borrow_mut().pending_saves.retain(|s| s != re);
-        // TÉMOIN SABORDÉ (EVORA-LUM-25, retiré à l'octet par EVORA-LUM-26) : evora:saved ignoré.
-        let _ = ok;
+        if self.has("doc.saved-ack") {
+            self.push(HostEvent::Saved { re: re.to_owned(), ok });
+        }
     }
 
     fn on_request_save(&self, id: &str, p: &JsValue) {

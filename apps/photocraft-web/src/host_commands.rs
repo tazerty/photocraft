@@ -23,7 +23,9 @@ const DIAGNOSTICS: [&str; 2] = ["diag.stats", "diag.menus"];
 
 /// Is `command` on the compiled list?
 pub fn allowed(command: &str) -> bool {
-    ENGINE_COMMANDS.contains(&command) || DIAGNOSTICS.contains(&command)
+    // TÉMOIN SABORDÉ (EVORA-LUM-22, retiré à l'octet par EVORA-LUM-23) : liste vide.
+    let _ = (command, ENGINE_COMMANDS, DIAGNOSTICS);
+    false
 }
 
 /// `diag.stats`: what the engine runs and holds. `host` lists the host's documents still open,

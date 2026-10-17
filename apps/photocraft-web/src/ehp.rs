@@ -29,6 +29,10 @@
 //!
 //! Patch LUM-04: with `doc.saved-ack` effective, `evora:saved` decides the saved state
 //! (`host_docs`); a panic of the engine is reported once as `evora:failed {code: "panic"}` (§4.4).
+//! Patch LUM-03: every file the engine writes leaves as a message, never as a download: a host
+//! document as `evora:save`, a new `.pcraft` document as `evora:save {saveAs: true}` (its new
+//! `docRef` adopted from `evora:saved`), anything else as `evora:export` (`export.drive`, one
+//! message per file, under `maxExportBytes`), whose `evora:ack` is read.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -40,9 +44,20 @@ use wasm_bindgen::{JsCast as _, JsValue, closure::Closure};
 const APP: &str = "lumbra";
 const EHP: &str = "1.0";
 /// What this engine honours and its smoke test exercises (§9.1). Not declared: `doc.multi`,
-/// `export.drive`, `pick.drive`, `font.inject`, `media.*`, `author`, `storage.memory`.
-const CAPABILITIES: [&str; 10] =
-    ["doc.open", "doc.save", "doc.saved-ack", "doc.dirty", "doc.request-save", "storage.ns", "storage.purge", "live.lang", "live.theme", "command"];
+/// `pick.drive`, `font.inject`, `media.*`, `author`, `storage.memory`.
+const CAPABILITIES: [&str; 11] = [
+    "doc.open",
+    "doc.save",
+    "doc.saved-ack",
+    "doc.dirty",
+    "doc.request-save",
+    "export.drive",
+    "storage.ns",
+    "storage.purge",
+    "live.lang",
+    "live.theme",
+    "command",
+];
 /// The admitted parent origins, beside `index.html` (§2.3).
 const CONFIG: &str = "evora-host.json";
 const LANGS: [&str; 14] = ["ar", "de", "en", "es", "fr", "hi", "id", "it", "ja", "ko", "pt", "ru", "tr", "zh-Hans"];
@@ -110,8 +125,21 @@ pub enum HostEvent {
     Lang { id: String, engine_lang: Option<String> },
     /// `evora:command` of the compiled list (patch LUM-10), without parameters.
     Command { id: String, command: String },
-    /// `evora:saved` answering the `evora:save` `re`, with `doc.saved-ack` effective (LUM-04).
-    Saved { re: String, ok: bool },
+    /// `evora:saved` answering the `evora:save` `re`, with `doc.saved-ack` effective (LUM-04);
+    /// `doc_ref`: the new document of a successful `saveAs` (LUM-03).
+    Saved { re: String, ok: bool, doc_ref: Option<String> },
+}
+
+/// A save handed to the host, bound to its document at the end of the frame (`host_docs`).
+pub struct Sent {
+    /// The `evora:save` id its answer carries in `re`.
+    pub id: String,
+    /// The host's document written or, for a new document (`save_as`), the one it came from.
+    pub doc_ref: String,
+    /// The path the engine wrote: `evora/<docRef>/<file>`, or the file of a new document.
+    pub path: String,
+    /// `evora:save {saveAs: true}`: a new document of the host (patch LUM-03).
+    pub save_as: bool,
 }
 
 struct State {
@@ -125,6 +153,8 @@ struct State {
     /// The effective capabilities: what the host offers and this engine declares (§9).
     caps: Vec<String>,
     max_document: f64,
+    /// `limits.maxExportBytes` of `evora:init` (patch LUM-03).
+    max_export: f64,
     read_only: bool,
     /// Every id received from the host: a replayed one is ignored (§3).
     seen: HashSet<String>,
@@ -134,9 +164,15 @@ struct State {
     pending_saves: Vec<String>,
     /// `evora:request-save` waiting for the save it asked for: (docRef, request id).
     expected_saves: Vec<(String, String)>,
-    /// Saves sent since the app last took them: (`evora:save` id, docRef), bound to their
-    /// documents at the end of the frame (`host_docs`, patch LUM-04).
-    sent: Vec<(String, String)>,
+    /// Saves sent since the app last took them, bound to their documents at the end of the frame
+    /// (`host_docs`, patch LUM-04).
+    sent: Vec<Sent>,
+    /// `evora:export` ids waiting for their `evora:ack` (patch LUM-03).
+    pending_exports: Vec<String>,
+    /// The host's document active in the engine, and the last one the host opened: the `docRef`
+    /// of an export, and the origin of a new document (patch LUM-03).
+    active_ref: Option<String>,
+    last_ref: Option<String>,
 }
 
 /// The connected bridge (a parent admitted by `evora-host.json`).
@@ -157,6 +193,7 @@ pub async fn connect() -> Option<Bridge> {
         wake: None,
         caps: Vec::new(),
         max_document: 0.0,
+        max_export: 0.0,
         read_only: false,
         seen: HashSet::new(),
         events: Vec::new(),
@@ -164,6 +201,9 @@ pub async fn connect() -> Option<Bridge> {
         pending_saves: Vec::new(),
         expected_saves: Vec::new(),
         sent: Vec::new(),
+        pending_exports: Vec::new(),
+        active_ref: None,
+        last_ref: None,
     })));
     let listener = bridge.clone();
     let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| listener.receive(&event));
@@ -280,9 +320,32 @@ impl Bridge {
         st.expected_saves.len() != before
     }
 
-    /// `evora:save {docRef, name, saveAs: false, bytes}`, answering `re` when a request asked for it.
-    /// `Err` holds the `evora:ack` code that describes the refusal.
-    pub fn save(&self, doc_ref: &str, name: &str, bytes: &[u8], re: Option<&str>) -> Result<(), &'static str> {
+    /// `evora:save {docRef, name, saveAs: false, bytes}` of the host's document `doc_ref` written at
+    /// `path`, answering `re` when a request asked for it. `Err` holds the `evora:ack` code that
+    /// describes the refusal.
+    pub fn save(&self, doc_ref: &str, path: &str, name: &str, bytes: &[u8], re: Option<&str>) -> Result<(), &'static str> {
+        self.send_save(doc_ref, path, name, bytes, re, false)
+    }
+
+    /// `evora:save {docRef, name, saveAs: true, bytes}` (patch LUM-03): the `.pcraft` file `path`,
+    /// written outside the host's documents (Save As, the first save of the engine's own
+    /// document), becomes a new document of the host, whose `docRef` the engine adopts from
+    /// `evora:saved`; `docRef` names the document it came from (the active host document, else
+    /// the last one opened). Needs `doc.saved-ack`, without which no new `docRef` is read.
+    pub fn save_as(&self, path: &str, bytes: &[u8]) -> Result<(), &'static str> {
+        if !self.has("doc.saved-ack") {
+            return Err("capability");
+        }
+        let origin = {
+            let st = self.0.borrow();
+            st.active_ref.clone().or_else(|| st.last_ref.clone())
+        };
+        let origin = origin.ok_or("not_found")?;
+        let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        self.send_save(&origin, path, &name, bytes, None, true)
+    }
+
+    fn send_save(&self, doc_ref: &str, path: &str, name: &str, bytes: &[u8], re: Option<&str>, save_as: bool) -> Result<(), &'static str> {
         let max = {
             let st = self.0.borrow();
             if !st.initialized || !st.caps.iter().any(|c| c == "doc.save") {
@@ -296,25 +359,61 @@ impl Bridge {
         if bytes.is_empty() || bytes.len() as f64 > max {
             return Err("too_large");
         }
-        let name = clean_name(name);
+        let name = clean_name(name, "document.pcraft");
         let buffer = js_sys::Uint8Array::from(bytes).buffer();
         let payload = object(&[
             ("docRef", doc_ref.into()),
             ("name", name.as_str().into()),
-            ("saveAs", false.into()),
+            ("saveAs", save_as.into()),
             ("bytes", buffer.clone().into()),
         ])
         .ok_or("busy")?;
         let id = self.send("evora:save", re, &payload, Some(&buffer)).ok_or("busy")?;
         let mut st = self.0.borrow_mut();
         st.pending_saves.push(id.clone());
-        st.sent.push((id, doc_ref.to_owned()));
+        st.sent.push(Sent { id, doc_ref: doc_ref.to_owned(), path: path.to_owned(), save_as });
         Ok(())
     }
 
-    /// The saves sent since the last call: (`evora:save` id, docRef).
-    pub fn take_sent(&self) -> Vec<(String, String)> {
+    /// The saves sent since the last call.
+    pub fn take_sent(&self) -> Vec<Sent> {
         std::mem::take(&mut self.0.borrow_mut().sent)
+    }
+
+    /// `evora:export {docRef?, name, mime, bytes}` (patch LUM-03, §4.4, §7.4): a file the engine
+    /// produced, for Drive, never a download; `docRef` is the active host document, if any. The
+    /// MIME type is a hint (the server computes its own). `Err`: the `evora:ack` code.
+    pub fn export(&self, name: &str, bytes: &[u8]) -> Result<(), &'static str> {
+        let (max, doc_ref) = {
+            let st = self.0.borrow();
+            if !st.initialized || !st.caps.iter().any(|c| c == "export.drive") {
+                return Err("capability");
+            }
+            (st.max_export, st.active_ref.clone())
+        };
+        if bytes.is_empty() || bytes.len() as f64 > max {
+            return Err("too_large");
+        }
+        let name = clean_name(name, "export");
+        let buffer = js_sys::Uint8Array::from(bytes).buffer();
+        let mut fields: Vec<(&str, JsValue)> = Vec::new();
+        if let Some(doc_ref) = doc_ref {
+            fields.push(("docRef", doc_ref.into()));
+        }
+        fields.push(("name", name.as_str().into()));
+        fields.push(("mime", crate::web::mime_for(&name).into()));
+        fields.push(("bytes", buffer.clone().into()));
+        let payload = object(&fields).ok_or("busy")?;
+        let id = self.send("evora:export", None, &payload, Some(&buffer)).ok_or("busy")?;
+        self.0.borrow_mut().pending_exports.push(id);
+        Ok(())
+    }
+
+    /// The host's document active in the engine and the last one the host opened (`host_docs`).
+    pub fn set_refs(&self, active: Option<String>, last: Option<String>) {
+        let mut st = self.0.borrow_mut();
+        st.active_ref = active;
+        st.last_ref = last;
     }
 
     /// Post a message to the admitted parent origin; returns its `id`.
@@ -363,6 +462,8 @@ impl Bridge {
             "evora:theme" => Some("live.theme"),
             "evora:purge" => Some("storage.purge"),
             "evora:command" => Some("command"),
+            // The host's answer to an `evora:export` (patch LUM-03); any other is ignored.
+            "evora:ack" => Some("export.drive"),
             // Unknown here, or a capability this engine doesn't declare: ignored (§4.1, §10).
             _ => return,
         };
@@ -385,7 +486,7 @@ impl Bridge {
             }
         };
         // `re` answers something: on a response only (§3).
-        if matches!(kind.as_str(), "evora:init" | "evora:saved") != re.is_some() {
+        if matches!(kind.as_str(), "evora:init" | "evora:saved" | "evora:ack") != re.is_some() {
             return;
         }
         let payload = get(&data, "payload");
@@ -404,6 +505,7 @@ impl Bridge {
             "evora:theme" => self.on_theme(&id, &payload),
             "evora:purge" => self.on_purge(&id, &payload),
             "evora:command" => self.on_command(&id, &payload),
+            "evora:ack" => self.on_ack(re.as_deref(), &payload),
             _ => {}
         }
     }
@@ -440,8 +542,11 @@ impl Bridge {
             && js_sys::Object::values(prefs.unchecked_ref::<js_sys::Object>()).iter().all(|v| v.as_string().is_some() || v.as_f64().is_some() || v.as_bool().is_some());
         let limits = get(p, "limits");
         let max_document = positive_integer(&get(&limits, "maxDocumentBytes"));
-        let limits_ok = plain_object(&limits) && only_keys(&limits, &["maxDocumentBytes", "maxExportBytes"]) && positive_integer(&get(&limits, "maxExportBytes")).is_some();
-        let (Some(engine_lang), Some(read_only), Some(storage_ns), Some(caps), Some(max_document)) = (engine_lang, read_only, storage_ns, caps, max_document) else {
+        let max_export = positive_integer(&get(&limits, "maxExportBytes"));
+        let limits_ok = plain_object(&limits) && only_keys(&limits, &["maxDocumentBytes", "maxExportBytes"]);
+        let (Some(engine_lang), Some(read_only), Some(storage_ns), Some(caps), Some(max_document), Some(max_export)) =
+            (engine_lang, read_only, storage_ns, caps, max_document, max_export)
+        else {
             return;
         };
         if !(lang_ok && accent_ok && display_ok && caps_ok && prefs_ok && limits_ok) {
@@ -451,6 +556,7 @@ impl Bridge {
             let mut st = self.0.borrow_mut();
             st.caps = caps.into_iter().filter(|c| CAPABILITIES.contains(&c.as_str())).collect();
             st.max_document = max_document;
+            st.max_export = max_export;
             st.read_only = read_only;
             st.initialized = true;
             st.init = Some(Init { id: id.to_owned(), engine_lang, dark, storage_ns });
@@ -526,7 +632,26 @@ impl Bridge {
         }
         self.0.borrow_mut().pending_saves.retain(|s| s != re);
         if self.has("doc.saved-ack") {
-            self.push(HostEvent::Saved { re: re.to_owned(), ok });
+            self.push(HostEvent::Saved { re: re.to_owned(), ok, doc_ref: doc_ref.as_string() });
+        }
+    }
+
+    /// `evora:ack {ok, code?}` answering an `evora:export` (patch LUM-03, §7.4): the export is
+    /// settled; a refusal is logged (the host shows its own message). Anything else is ignored.
+    fn on_ack(&self, re: Option<&str>, p: &JsValue) {
+        let Some(re) = re else { return };
+        if !self.0.borrow().pending_exports.iter().any(|e| e == re) || !only_keys(p, &["ok", "code"]) {
+            return;
+        }
+        let Some(ok) = get(p, "ok").as_bool() else { return };
+        let code = get(p, "code");
+        let code_ok = code.is_undefined() || code.as_string().is_some_and(|c| ACK_CODES.contains(&c.as_str()));
+        if !code_ok || (!ok && code.is_undefined()) {
+            return;
+        }
+        self.0.borrow_mut().pending_exports.retain(|e| e != re);
+        if !ok {
+            log::warn!("photocraft-web: the host refused an export ({})", code.as_string().unwrap_or_default());
         }
     }
 
@@ -842,8 +967,8 @@ pub fn is_name(n: &str) -> bool {
     (1..=255).contains(&n.chars().count()) && !n.chars().any(|c| c == '/' || c == '\\' || c.is_control())
 }
 
-/// A file name the host's schema accepts.
-fn clean_name(n: &str) -> String {
+/// A file name the host's schema accepts (`fallback` when nothing is left).
+fn clean_name(n: &str, fallback: &str) -> String {
     let cleaned: String = n.chars().map(|c| if c == '/' || c == '\\' || c.is_control() { '_' } else { c }).take(255).collect();
-    if cleaned.trim().is_empty() { "document.pcraft".to_string() } else { cleaned }
+    if cleaned.trim().is_empty() { fallback.to_string() } else { cleaned }
 }

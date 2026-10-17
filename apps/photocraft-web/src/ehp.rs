@@ -589,7 +589,9 @@ impl Bridge {
             // A blank document from the host (patch LUM-12): the engine's New Document dialog.
             ["new"] => {
                 if get(p, "new").as_bool() == Some(true) {
-                    self.push(HostEvent::OpenNew { id: id.to_owned(), doc_ref, name });
+                    // TÉMOIN SABORDÉ (EVORA-LUM-31, retiré à l'octet par EVORA-LUM-32) : retour à unsupported.
+                    let _ = (&doc_ref, &name);
+                    self.ack(id, false, Some("unsupported"));
                 }
                 return;
             }

@@ -78,7 +78,7 @@ const TYPES = {
   '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ttf': 'font/ttf', '.woff2': 'font/woff2',
 };
 
-const report = { ok: false, errors: [], allowed: [], warnings: [], console: [], served: {}, steps: [], afterPanic: [] };
+const report = { ok: false, errors: [], allowed: [], warnings: [], console: [], served: {}, steps: [], afterPanic: [], downloads: [] };
 // LUM-04 : une fois la panique demandée (pont-panique), les erreurs de page sont les siennes.
 let panicSent = false;
 const pageError = (item) => (panicSent ? report.afterPanic : report.errors).push(item);
@@ -285,6 +285,11 @@ async function main() {
   chrome.stderr.on('data', (d) => { stderr += d.toString(); });
   chrome.on('exit', (code) => log(`Chrome terminé (code ${code})`));
   const c = cdp(chrome);
+  // LUM-03 : tout téléchargement est accepté dans un dossier temporaire et annoncé
+  // (Browser.downloadWillBegin), donc compté ; la coquille du banc pont-ehp l'autorise
+  // (sandbox allow-downloads) : un moteur qui en déclenche un se voit, aucun n'est attendu.
+  const downloadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'evora-downloads-'));
+  await c.send('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: downloadDir, eventsEnabled: true });
   const version = await c.send('Browser.getVersion');
   report.chrome = version.product;
   log(`navigateur : ${version.product}`);
@@ -343,6 +348,9 @@ async function main() {
         }
         break;
       }
+      case 'Browser.downloadWillBegin':
+        report.downloads.push(`${p.suggestedFilename || '?'} (${String(p.url || '').slice(0, 80)})`);
+        break;
       case 'Target.targetCrashed':
       case 'Inspector.targetCrashed':
         pageError(`${where} : plantage de la cible`);
@@ -465,6 +473,9 @@ async function main() {
   }
   if (last && last.origin !== engineOrigin) problems.push(`origine du document moteur inattendue : ${last && last.origin}`);
   if (last && last.parent !== parentOrigin) problems.push(`origine parente inattendue : ${last && last.parent}`);
+  if (report.downloads.length) {
+    problems.push(`${EHP ? '[ehp:downloads] ' : ''}${report.downloads.length} téléchargement(s) déclenché(s) par le moteur : ${report.downloads.join(', ')}`);
+  }
   const stray404 = state.notFound.filter((p) => !ALLOWED_404.includes(p));
   if (stray404.length) problems.push(`404 inattendus : ${stray404.join(', ')}`);
   const st = report.storage || { keys: [], dbs: [] };
@@ -528,6 +539,7 @@ async function main() {
     `| Thème des préférences | ${report.storage ? report.storage.theme ?? '—' : '—'}${EXPECT_THEME ? ` (attendu : ${EXPECT_THEME})` : ''} |`,
     `| Langue des préférences | ${report.storage ? report.storage.language ?? '—' : '—'}${EXPECT_LANG ? ` (attendue : ${EXPECT_LANG})` : ''} |`,
     `| Erreurs de page | ${report.errors.length} |`,
+    `| Téléchargements (aucun attendu) | ${report.downloads.length} |`,
     `| Exceptions admises (404 fonts/manifest.txt) | ${report.allowed.length} |`,
     `| Avertissements de console | ${report.warnings.length} |`,
     ...(report.witness ? [`| Témoin sabordé « ${report.witness.mode} » | ${report.witness.seen.length} rouge(s) vu(s) sur ${report.witness.expected.length} attendu(s), ${report.witness.sabotaged.length} sabotage(s) du banc joué(s) |`] : []),

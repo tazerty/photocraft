@@ -507,12 +507,14 @@ export class EhpBench {
     }
   }
 
-  // Un message du moteur qui satisfait pred, attendu au plus ms millisecondes.
-  async waitEngine(pred, ms) {
+  // Un message du moteur qui satisfait pred, attendu au plus ms millisecondes ; avec `from`, seuls
+  // comptent les messages entrés au journal à partir de cette position (le journal ne fait que
+  // croître).
+  async waitEngine(pred, ms, from = 0) {
     const end = Date.now() + ms;
     for (;;) {
       await this.refresh();
-      const hit = this.engineMessages().find((e) => e.plain && pred(e.msg));
+      const hit = this.state.log.slice(from).find((e) => e.fromEngine && e.plain && pred(e.msg));
       if (hit || Date.now() > end) return hit || null;
       await sleep(200);
     }
@@ -620,11 +622,15 @@ export class EhpBench {
   }
 
   // Une touche (expression évaluée dans le document moteur), renouvelée tant que pred n'est pas
-  // observé chez un message du moteur (jamais un message fabriqué par le témoin « banc »).
+  // observé chez un message du moteur (jamais un message fabriqué par le témoin « banc ») arrivé
+  // APRÈS la touche : un message plus ancien qui satisfait pred (un evora:dirty true d'une étape
+  // précédente) ferait partir la suite avant l'effet de la touche (run 38984687150 : « modification
+  // tardive » répondue « clean », la touche prise en compte après la demande).
   async pressExpr(expr, label, pred, what) {
+    const mark = (await this.refresh()).log.length;
     for (let attempt = 1; attempt <= 3; attempt++) {
       const focused = await this.evaluate(this.frame(), expr, true);
-      const hit = await this.waitEngine((m) => pred(m) && !this.injectedIds.includes(m.id), 5000);
+      const hit = await this.waitEngine((m) => pred(m) && !this.injectedIds.includes(m.id), 5000, mark);
       if (hit) return hit;
       this.log(`[ehp] ${label} (essai ${attempt}, canvas focalisé : ${focused}) : ${what} non observé`);
     }

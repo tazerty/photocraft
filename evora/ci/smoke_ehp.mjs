@@ -31,6 +31,10 @@
 //     false, demande « clean » pour le nouveau, not_found pour l'ancien, plus aucun message pour
 //     l'ancien) ; un document du moteur (file.new, Entrée) crée au premier Ctrl+S un document de la
 //     coquille ; aucun téléchargement (compté par smoke.mjs, Browser.downloadWillBegin) ;
+//   - evora:open {new: true} (LUM-12) : le dialogue Nouveau document du moteur s'ouvre pour le
+//     docRef (compté par diag.stats) ; Entrée : un seul accusé positif, dirty false, document de
+//     la coquille, demande « clean » ; Échap sur un second : un seul accusé {ok: false, code:
+//     "cancelled"}, aucun document ;
 //   - evora:command (LUM-10) : diag.stats et diag.menus accusés avec leur résultat ; file.new,
 //     file.export.exportAs et edit.keyboardShortcuts accusés positivement, chacun ouvrant un
 //     dialogue du moteur (compté par diag.stats) que la touche Échap referme ; view.zoomIn et
@@ -75,6 +79,9 @@ const DOC_REF = '01JZZSMKEDCQMENTREF0000001';
 // enregistrement d'un document du moteur).
 const ADOPT_REF = '01JZZSMKEDCQMENTREF0000002';
 const LOCAL_REF = '01JZZSMKEDCQMENTREF0000003';
+// LUM-12 : docRef des documents neufs demandés par la coquille (créé, puis annulé).
+const NEW_REF = '01JZZSMKEDCQMENTREF0000004';
+const CANCEL_REF = '01JZZSMKEDCQMENTREF0000005';
 const MIME_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
 const STORAGE_NS = 'ab'.repeat(32);
 // E5 : un autre compte du même navigateur, et un autre moteur servi par la même origine.
@@ -136,6 +143,8 @@ export const BANC_SABOTAGES = [
   { tag: 'ehp:export-refused', kind: 'message' },
   { tag: 'ehp:save-as-adopt', kind: 'message' },
   { tag: 'ehp:local-doc-first-save', kind: 'message' },
+  { tag: 'ehp:open-new', kind: 'message' },
+  { tag: 'ehp:open-new-cancel', kind: 'message' },
 ];
 // Témoin « moteur » (removeItem, clear et deleteDatabase sans effet) : les rouges attendus, chacun à
 // son contrôle. Les restes non effacés font aussi rougir les témoins de purge et la réécriture : ce
@@ -692,6 +701,7 @@ export class EhpBench {
     if (st.language !== 'de') this.fail('lang', `langue enregistrée après evora:lang de : ${st.language}, attendue de (${STORAGE_NS.slice(0, 8)}…:${PREFS})`);
     await this.savedAck();
     await this.exports();
+    await this.openNew();
     await this.commands();
     await this.storagePhases(st);
   }
@@ -833,6 +843,45 @@ export class EhpBench {
         if (!(await this.until(() => this.dirtyAfter(adopted, false, LOCAL_REF), 10000))) this.fail('local-doc-first-save', 'evora:dirty {dirty: false} du nouveau document absent');
         const r = await this.stats();
         if (!r || !r.open.some((d) => d.docRef === LOCAL_REF)) this.fail('local-doc-first-save', `document adopté absent de diag.stats : ${JSON.stringify(r && r.open)}`);
+      }
+    }
+  }
+
+  // LUM-12 : evora:open {new: true}. Le dialogue Nouveau document du moteur s'ouvre (diag.stats) ;
+  // Entrée crée le document de la coquille (accusé, dirty false, diag.stats, demande « clean ») ;
+  // Échap, sur un second, l'annule (accusé cancelled, aucun document). Les accusés sont jugés par
+  // verify() : un seul, conforme, par demande.
+  async openNew() {
+    for (const [tag, ref, key] of [['open-new', NEW_REF, 'Enter'], ['open-new-cancel', CANCEL_REF, 'Escape']]) {
+      const before = await this.stats();
+      const id = await this.send('evora:open', `{ docRef: ${JSON.stringify(ref)}, name: 'Sans titre.pcraft', new: true }`);
+      this.ids[tag] = id;
+      if (!before || !(await this.dialogsReach(before.dialogs + 1, () => this.stats(), 8000))) {
+        this.fail(tag, 'evora:open {new: true} sans dialogue Nouveau document dans le moteur');
+        continue;
+      }
+      let answer = null;
+      for (let attempt = 1; attempt <= 3 && !answer; attempt++) {
+        await this.evaluate(this.frame(), keyPress(key, key), true);
+        answer = await this.waitEngine((m) => m.type === 'evora:ack' && m.re === id && !this.injectedIds.includes(m.id), 4000);
+      }
+      const after = await this.stats();
+      if (tag === 'open-new') {
+        if (answer && answer.msg.payload.ok === true) {
+          if (!(await this.until(() => this.dirtyAfter(id, false, ref), 10000))) this.fail(tag, 'evora:dirty {dirty: false} absent après la création du document neuf');
+          if (!after || !after.open.some((d) => d.docRef === ref && d.dirty === false)) this.fail(tag, `document neuf absent de diag.stats : ${JSON.stringify(after && after.open)}`);
+          const rq = await this.send('evora:request-save', `{ reason: 'user', docRef: ${JSON.stringify(ref)} }`);
+          const ack = await this.waitEngine((m) => m.re === rq && !this.injectedIds.includes(m.id), 15000);
+          if (!ack || ack.msg.type !== 'evora:ack' || ack.msg.payload.code !== 'clean') {
+            this.fail(tag, `demande d'enregistrement du document neuf : attendu « clean », reçu ${JSON.stringify(ack && ack.msg)}`);
+          }
+        }
+        await this.sabotage('open-new', 'annulation fabriquée du document neuf', `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(id)}, payload: { ok: false, code: 'cancelled' } }`);
+      } else {
+        if (!after || after.open.some((d) => d.docRef === ref) || after.documents !== before.documents || after.dialogs !== before.dialogs) {
+          this.fail(tag, `après l'annulation, diag.stats : ${JSON.stringify(after)} (avant : ${before.documents} document(s), ${before.dialogs} dialogue(s))`);
+        }
+        await this.sabotage('open-new-cancel', 'accusé positif fabriqué du document annulé', `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(id)}, payload: { ok: true } }`);
       }
     }
   }
@@ -1254,6 +1303,16 @@ export class EhpBench {
       }[w.kind] || ((e) => e.msg.type === 'evora:dirty' && e.msg.payload && e.msg.payload.dirty === false && e.msg.payload.docRef === w.docRef);
       const wrong = this.state.log.slice(from + 1, to < 0 ? undefined : to).filter((e) => e.fromEngine && e.plain && e.msg && bad(e));
       if (wrong.length) this.fail(w.tag, `${w.what} : ${w.kind === 'export' ? 'evora:export' : w.kind === 'ref' ? `message pour ${w.docRef}` : 'evora:dirty {dirty: false}'} reçu (${wrong.map((e) => e.msg.id).join(', ')})`);
+    }
+    // LUM-12 : un seul accusé par evora:open {new: true}, positif après Entrée, cancelled après Échap.
+    for (const [tag, want] of [['open-new', (p) => p.ok === true && p.code === undefined], ['open-new-cancel', (p) => p.ok === false && p.code === 'cancelled']]) {
+      if (!this.ids[tag]) continue;
+      const rs = answered(this.ids[tag]);
+      const bad = rs.filter((e) => e.msg.type !== 'evora:ack' || !want(e.msg.payload || {}));
+      if (rs.length !== 1 || bad.length) {
+        this.fail(tag, `evora:open {new: true} (id ${this.ids[tag]}) : ${rs.length} réponse(s) [${rs.map((e) => e.msg.id).join(', ')}], `
+          + `non conformes : ${bad.map((e) => `${e.msg.id} ${JSON.stringify(e.msg.payload)}`).join(' | ') || 'aucune'}`);
+      }
     }
     // LUM-04 (d, S-ACK-6) : un seul accusé, positif, du rechargement du même docRef.
     if (this.ids.reload) {

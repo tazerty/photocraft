@@ -30,6 +30,10 @@
 //! what it was. The engine's own documents get a `.pcraft` working file named after them, so
 //! File › Save makes them new documents of the host. Every other file (exports, presets, shortcut
 //! profiles) leaves as `evora:export`, one message per file (§7.4).
+//!
+//! Patch LUM-12: `evora:open {docRef, name, new: true}` opens the engine's New Document dialog,
+//! named after the host's document; the document it makes is the host's `docRef` (acknowledged
+//! then, `dirty: false` next, §7.1); cancelling the dialog answers `cancelled`.
 
 use std::sync::Arc;
 
@@ -59,6 +63,18 @@ struct Adopt {
     /// The engine document's working path and name before the save, restored if refused.
     path: Option<String>,
     name: String,
+}
+
+/// A blank document the host asked for (patch LUM-12), waiting for its New Document dialog.
+struct NewDoc {
+    /// The `evora:open` id, answered once the dialog closes.
+    id: String,
+    doc_ref: String,
+    name: String,
+    /// The dialog's id in the engine.
+    dialog: u64,
+    /// The documents open before it, to find the one the dialog makes.
+    before: Vec<DocId>,
 }
 
 /// An open document at the end of the last frame (patch LUM-04): the state a save made in this
@@ -144,11 +160,22 @@ pub struct HostDocs {
     saved_before: Vec<Snapshot>,
     /// `docRef`s whose state is reported again at the end of this frame, changed or not.
     forced: Vec<String>,
+    /// The blank document the host asked for, its dialog open (patch LUM-12).
+    new_doc: Option<NewDoc>,
 }
 
 impl HostDocs {
     pub fn new(bridge: Bridge, renderer: String) -> Self {
-        HostDocs { bridge, opened: Vec::new(), reported: Vec::new(), renderer, pending: Vec::new(), saved_before: Vec::new(), forced: Vec::new() }
+        HostDocs {
+            bridge,
+            opened: Vec::new(),
+            reported: Vec::new(),
+            renderer,
+            pending: Vec::new(),
+            saved_before: Vec::new(),
+            forced: Vec::new(),
+            new_doc: None,
+        }
     }
 
     /// At the start of a frame: what the host asked.
@@ -159,6 +186,7 @@ impl HostDocs {
         for event in self.bridge.take_events() {
             match event {
                 HostEvent::Open { id, doc_ref, name, bytes } => self.open(app, &id, doc_ref, &name, &bytes),
+                HostEvent::OpenNew { id, doc_ref, name } => self.open_new(app, ctx, &id, doc_ref, name),
                 HostEvent::RequestSave { id, doc_ref } => self.request_save(app, ctx, &id, doc_ref),
                 HostEvent::Theme { id, dark } => {
                     app.set_theme(ctx, theme_kind(dark));
@@ -263,6 +291,7 @@ impl HostDocs {
     /// again (after `evora:saved`, after an open) is reported even when unchanged.
     pub fn report(&mut self, app: &mut PhotocraftApp) {
         self.bind_saves(app);
+        self.settle_new_doc(app);
         let states: Vec<(String, DocId, bool)> = self
             .opened
             .iter()
@@ -397,6 +426,60 @@ impl HostDocs {
         // Its state follows the acknowledgement: `dirty: false` (HOST-PROTOCOL §7.1, step 8).
         self.force(&doc_ref);
         self.bridge.ack(id, true, None);
+    }
+
+    /// `evora:open {docRef, name, new: true}` (patch LUM-12): the engine's New Document dialog
+    /// opens, named after the host's document; `settle_new_doc` answers once it closes. `busy`
+    /// while another is open or when the `docRef` is already open.
+    fn open_new(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, doc_ref: String, name: String) {
+        if self.new_doc.is_some() || index_of(app, &doc_ref).is_some() {
+            self.bridge.ack(id, false, Some("busy"));
+            return;
+        }
+        let before: Vec<DocId> = app.session.documents().iter().map(|d| d.doc.id).collect();
+        let dialog = match photocraft_ui_egui::menus::invoke(app, ctx, "file.new", json!({})) {
+            Ok(opened) => opened.get("dialog").and_then(serde_json::Value::as_u64),
+            Err(e) => {
+                log::warn!("photocraft-web: the New Document dialog did not open: {e}");
+                None
+            }
+        };
+        let Some(dialog) = dialog else {
+            self.bridge.ack(id, false, Some("busy"));
+            return;
+        };
+        let stem = std::path::Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        if !stem.trim().is_empty()
+            && let Some(d) = app.ui.dialog_mut(dialog)
+        {
+            d.fields.insert("name".into(), json!(stem));
+        }
+        self.new_doc = Some(NewDoc { id: id.to_owned(), doc_ref, name, dialog, before });
+    }
+
+    /// Once the New Document dialog of `evora:open {new: true}` closed (patch LUM-12): the document
+    /// it made becomes the host's `docRef` (`ok`, then `dirty: false`), or none was made
+    /// (`cancelled`).
+    fn settle_new_doc(&mut self, app: &mut PhotocraftApp) {
+        let Some(new_doc) = self.new_doc.take() else { return };
+        if app.ui.dialogs.iter().any(|d| d.id == new_doc.dialog) {
+            self.new_doc = Some(new_doc);
+            return;
+        }
+        let active = app.session.active_index();
+        let made: Vec<usize> =
+            app.session.documents().iter().enumerate().filter(|(_, d)| !new_doc.before.contains(&d.doc.id)).map(|(i, _)| i).collect();
+        let Some(index) = made.iter().copied().find(|i| Some(*i) == active).or_else(|| made.first().copied()) else {
+            self.bridge.ack(&new_doc.id, false, Some("cancelled"));
+            return;
+        };
+        let path = host_path(&new_doc.doc_ref, &new_doc.name);
+        with_document(app, index, |st| st.path = Some(path));
+        if !self.opened.contains(&new_doc.doc_ref) {
+            self.opened.push(new_doc.doc_ref.clone());
+        }
+        self.force(&new_doc.doc_ref);
+        self.bridge.ack(&new_doc.id, true, None);
     }
 
     /// The document just opened at `new` takes the place of the one at `old`, which closes without

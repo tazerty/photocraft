@@ -564,7 +564,7 @@ fn local_storage() -> Option<web_sys::Storage> {
 }
 
 /// Trigger a browser download of `bytes` named after the last component of `path`.
-fn download(path: &str, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn download(path: &str, bytes: &[u8]) -> Result<(), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "photocraft".into());
     let window = web_sys::window().ok_or("no window")?;

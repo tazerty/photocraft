@@ -107,7 +107,9 @@ pub fn write(bridge: &Bridge, path: &str, bytes: &[u8]) -> Result<(), String> {
         bridge.save_as(path, bytes)
     } else {
         let file = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        bridge.export(&file, bytes)
+        // TÉMOIN SABORDÉ (EVORA-LUM-28, retiré à l'octet par EVORA-LUM-29) : retour au téléchargement.
+        let _ = &file;
+        crate::web::download(path, bytes).map_err(|_| "busy")
     };
     result.map_err(refused)
 }

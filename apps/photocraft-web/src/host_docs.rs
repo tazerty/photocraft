@@ -22,6 +22,16 @@
 //! `evora:open` of a `docRef` already open replaces its content with the host's version (the
 //! engine's changes are dropped, without a prompt), as the host's « reload the server version »
 //! does after a conflict (§6.2).
+//!
+//! Patch LUM-03: no write is refused any more, and none becomes a download (`write`). A `.pcraft`
+//! file written outside the host's documents (Save As, the save of the engine's own document)
+//! becomes a new document of the host: `evora:save {saveAs: true}`, then, on `evora:saved
+//! {ok: true, docRef}`, the engine document adopts that `docRef` (§7.3); refused, it is again
+//! what it was. The engine's own documents get a `.pcraft` working file named after them, so
+//! File › Save makes them new documents of the host. Every other file (exports, presets, shortcut
+//! profiles) leaves as `evora:export`, one message per file (§7.4).
+
+use std::sync::Arc;
 
 use photocraft_doc::DocId;
 use photocraft_ui_egui::PhotocraftApp;
@@ -38,6 +48,26 @@ struct Pending {
     doc: DocId,
     /// The revision the bytes were written from.
     token: u64,
+    /// A new document of the host (`saveAs`, patch LUM-03): what to adopt or restore.
+    adopt: Option<Adopt>,
+}
+
+/// A new document of the host in flight (patch LUM-03).
+struct Adopt {
+    /// The file written, named again under the new `docRef` once adopted.
+    file: String,
+    /// The engine document's working path and name before the save, restored if refused.
+    path: Option<String>,
+    name: String,
+}
+
+/// An open document at the end of the last frame (patch LUM-04): the state a save made in this
+/// frame goes back to until the host answers.
+struct Snapshot {
+    doc: DocId,
+    saved_revision: u64,
+    path: Option<String>,
+    name: String,
 }
 
 /// Where the host's documents live: `evora/<docRef>/<name>.pcraft`.
@@ -56,23 +86,37 @@ fn host_target(path: &str) -> Option<(&str, &str)> {
     (crate::ehp::is_ulid(doc_ref) && crate::ehp::is_name(file) && file.ends_with(".pcraft")).then_some((doc_ref, file))
 }
 
-/// The web `write` service while the bridge runs: a host document's save becomes `evora:save`;
-/// anything else is refused (no download).
+/// The web `write` service while the bridge runs, never a download (patches E4, LUM-03): a host
+/// document's save becomes `evora:save`; another `.pcraft` file a new document of the host
+/// (`evora:save {saveAs: true}`); any other file an `evora:export`, one message per file.
 pub fn write(bridge: &Bridge, path: &str, bytes: &[u8]) -> Result<(), String> {
-    let Some((doc_ref, file)) = host_target(path) else {
-        log::warn!("photocraft-web: write outside the Evora document refused: {path}");
-        return Err("Only the document opened from Evora can be saved here, with File > Save".into());
-    };
-    let request = bridge.take_expected_save(doc_ref);
-    match bridge.save(doc_ref, file, bytes, request.as_deref()) {
-        Ok(()) => Ok(()),
-        Err(code) => {
-            if let Some(request) = request {
-                bridge.ack(&request, false, Some(code));
+    let refused = |code: &str| format!("Evora could not take the document ({code})");
+    if let Some((doc_ref, file)) = host_target(path) {
+        let request = bridge.take_expected_save(doc_ref);
+        return match bridge.save(doc_ref, path, file, bytes, request.as_deref()) {
+            Ok(()) => Ok(()),
+            Err(code) => {
+                if let Some(request) = request {
+                    bridge.ack(&request, false, Some(code));
+                }
+                Err(refused(code))
             }
-            Err(format!("Evora could not take the document ({code})"))
-        }
+        };
     }
+    let result = if photocraft_engine::file_cmds::extension(path).as_deref() == Some("pcraft") {
+        bridge.save_as(path, bytes)
+    } else {
+        let file = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        bridge.export(&file, bytes)
+    };
+    result.map_err(refused)
+}
+
+/// The working file of an engine document of its own (patch LUM-03): `<name>.pcraft`.
+fn local_path(name: &str) -> String {
+    let stem = std::path::Path::new(name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = if stem.trim().is_empty() { "document".to_string() } else { stem };
+    format!("{stem}.pcraft")
 }
 
 /// The engine language for the host's `engineLang` (its E3 mapping): English when the host has
@@ -96,9 +140,8 @@ pub struct HostDocs {
     renderer: String,
     /// Saves waiting for `evora:saved` (patch LUM-04).
     pending: Vec<Pending>,
-    /// Each open document's saved revision at the end of the last frame: the state a save made
-    /// in this frame goes back to until the host answers.
-    saved_before: Vec<(DocId, u64)>,
+    /// The open documents at the end of the last frame (patches LUM-04, LUM-03).
+    saved_before: Vec<Snapshot>,
     /// `docRef`s whose state is reported again at the end of this frame, changed or not.
     forced: Vec<String>,
 }
@@ -112,6 +155,7 @@ impl HostDocs {
     pub fn apply(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context) {
         // A save is always bound before its answer is read, even after a frame without `ui`.
         self.bind_saves(app);
+        self.share_refs(app);
         for event in self.bridge.take_events() {
             match event {
                 HostEvent::Open { id, doc_ref, name, bytes } => self.open(app, &id, doc_ref, &name, &bytes),
@@ -131,7 +175,7 @@ impl HostDocs {
                     }
                 }
                 HostEvent::Command { id, command } => self.command(app, ctx, &id, &command),
-                HostEvent::Saved { re, ok } => self.saved(app, &re, ok),
+                HostEvent::Saved { re, ok, doc_ref } => self.saved(app, &re, ok, doc_ref),
             }
         }
     }
@@ -139,11 +183,37 @@ impl HostDocs {
     /// `evora:saved` for a save in flight (patch LUM-04, HOST-PROTOCOL §4.3 and §4.5). `ok: true`
     /// marks the document saved at the revision written, so it stays modified when it changed
     /// since; `ok: false` keeps it, or makes it, modified. Its state is reported again either way.
-    fn saved(&mut self, app: &mut PhotocraftApp, re: &str, ok: bool) {
+    /// A new document of the host (patch LUM-03) adopts the `docRef` of `ok: true`; refused, or
+    /// without a `docRef`, it is again what it was before the save, and modified.
+    fn saved(&mut self, app: &mut PhotocraftApp, re: &str, ok: bool, new_ref: Option<String>) {
         let Some(at) = self.pending.iter().position(|p| p.id == re) else { return };
         let pending = self.pending.remove(at);
         // A document closed or replaced meanwhile: the answer no longer applies.
         let Some(index) = app.session.documents().iter().position(|d| d.doc.id == pending.doc) else { return };
+        let adopted = match (&pending.adopt, ok, new_ref) {
+            (Some(adopt), true, Some(new_ref)) => {
+                let path = host_path(&new_ref, &adopt.file);
+                with_document(app, index, |st| st.path = Some(path));
+                Some(new_ref)
+            }
+            (Some(adopt), _, _) => {
+                let (path, name) = (adopt.path.clone(), adopt.name.clone());
+                with_document(app, index, |st| {
+                    st.path = path;
+                    if st.doc.name != name {
+                        Arc::make_mut(&mut st.doc).name = name;
+                    }
+                });
+                None
+            }
+            (None, _, _) => None,
+        };
+        let ok = ok && (pending.adopt.is_none() || adopted.is_some());
+        if let Some(new_ref) = adopted
+            && !self.opened.contains(&new_ref)
+        {
+            self.opened.push(new_ref);
+        }
         with_document(app, index, |st| {
             if ok {
                 if pending.token > st.saved_revision {
@@ -218,7 +288,43 @@ impl HostDocs {
             }
         }
         self.forced.clear();
-        self.saved_before = app.session.documents().iter().map(|d| (d.doc.id, d.saved_revision)).collect();
+        self.name_local_documents(app);
+        self.share_refs(app);
+        self.saved_before = app
+            .session
+            .documents()
+            .iter()
+            .map(|d| Snapshot { doc: d.doc.id, saved_revision: d.saved_revision, path: d.path.clone(), name: d.doc.name.clone() })
+            .collect();
+    }
+
+    /// The engine's own documents (File › New, a local file) get their `.pcraft` working file
+    /// (patch LUM-03), so File › Save makes them new documents of the host instead of a flat
+    /// export. Edit Contents documents keep saving into their smart object. Needs
+    /// `doc.saved-ack`, without which no new document can be adopted.
+    fn name_local_documents(&mut self, app: &mut PhotocraftApp) {
+        if !self.bridge.has("doc.saved-ack") {
+            return;
+        }
+        let unnamed: Vec<(usize, String)> = app
+            .session
+            .documents()
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| d.path.is_none() && !app.session.smart_links.iter().any(|l| l.child == d.doc.id))
+            .map(|(i, d)| (i, local_path(&d.doc.name)))
+            .collect();
+        for (i, path) in unnamed {
+            with_document(app, i, |st| st.path = Some(path));
+        }
+    }
+
+    /// Tell the bridge which host document is active (an export's `docRef`) and which one the host
+    /// opened last (the origin of a new document), patch LUM-03.
+    fn share_refs(&self, app: &PhotocraftApp) {
+        let active = app.session.active_index().and_then(|i| self.doc_ref_at(app, i));
+        let last = self.opened.iter().rev().find(|r| index_of(app, r).is_some()).cloned();
+        self.bridge.set_refs(active, last);
     }
 
     /// Bind each save handed to the host in this frame to its document (patch LUM-04): the save
@@ -230,16 +336,31 @@ impl HostDocs {
         if !self.bridge.has("doc.saved-ack") {
             return;
         }
-        for (id, doc_ref) in sent {
-            let Some(index) = index_of(app, &doc_ref) else { continue };
-            let Some((doc, token)) = app.session.documents().get(index).map(|d| (d.doc.id, d.saved_revision)) else { continue };
-            let before = self.saved_before.iter().find(|(d, _)| *d == doc).map(|(_, r)| *r);
-            if let Some(before) = before
+        for sent in sent {
+            // A new document (patch LUM-03): the engine document written at that path (Save As,
+            // or the save of the engine's own document), the active one first. None: a copy.
+            let index = if sent.save_as {
+                let active = app.session.active_index();
+                let written: Vec<usize> =
+                    app.session.documents().iter().enumerate().filter(|(_, d)| d.path.as_deref() == Some(sent.path.as_str())).map(|(i, _)| i).collect();
+                written.iter().copied().find(|i| Some(*i) == active).or_else(|| written.first().copied())
+            } else {
+                index_of(app, &sent.doc_ref)
+            };
+            let Some(index) = index else { continue };
+            let Some((doc, token, name)) = app.session.documents().get(index).map(|d| (d.doc.id, d.saved_revision, d.doc.name.clone())) else { continue };
+            let before = self.saved_before.iter().find(|s| s.doc == doc);
+            let file = std::path::Path::new(&sent.path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let adopt = sent.save_as.then(|| match before {
+                Some(s) => Adopt { file: file.clone(), path: s.path.clone(), name: s.name.clone() },
+                None => Adopt { file: file.clone(), path: None, name },
+            });
+            if let Some(before) = before.map(|s| s.saved_revision)
                 && before != token
             {
                 with_document(app, index, |st| st.saved_revision = before);
             }
-            self.pending.push(Pending { id, doc, token });
+            self.pending.push(Pending { id: sent.id, doc, token, adopt });
         }
     }
 

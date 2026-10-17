@@ -24,6 +24,13 @@
 //     puis dirty false, un seul document de ce docRef, demande suivante « clean ») ;
 //   - evora:theme et evora:lang : accusés positifs, thème et langue enregistrés par le moteur, sous
 //     l'espace de noms reçu dans evora:init ;
+//   - export.drive (LUM-03) : Export As (file.export.exportAs, Entrée) rend un evora:export PNG
+//     conforme (docRef, nom, MIME, octets PNG), accusé par la coquille ; un second, refusé (quota),
+//     n'est ni renvoyé ni remplacé par un téléchargement ; Enregistrer sous (Ctrl+Maj+S) rend
+//     evora:save {saveAs: true} en .pcraft, et le moteur adopte le docRef de evora:saved (dirty
+//     false, demande « clean » pour le nouveau, not_found pour l'ancien, plus aucun message pour
+//     l'ancien) ; un document du moteur (file.new, Entrée) crée au premier Ctrl+S un document de la
+//     coquille ; aucun téléchargement (compté par smoke.mjs, Browser.downloadWillBegin) ;
 //   - evora:command (LUM-10) : diag.stats et diag.menus accusés avec leur résultat ; file.new,
 //     file.export.exportAs et edit.keyboardShortcuts accusés positivement, chacun ouvrant un
 //     dialogue du moteur (compté par diag.stats) que la touche Échap referme ; view.zoomIn et
@@ -64,6 +71,11 @@ export const PANIC_SCENARIO = 'pont-panique';
 const PANIC_TRIGGER = 'evora:smoke-panic';
 // Référence du document ouvert par la coquille et espace de noms du compte (valeurs de banc).
 const DOC_REF = '01JZZSMKEDCQMENTREF0000001';
+// LUM-03 : docRef des nouveaux documents que la coquille crée (Enregistrer sous, premier
+// enregistrement d'un document du moteur).
+const ADOPT_REF = '01JZZSMKEDCQMENTREF0000002';
+const LOCAL_REF = '01JZZSMKEDCQMENTREF0000003';
+const MIME_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
 const STORAGE_NS = 'ab'.repeat(32);
 // E5 : un autre compte du même navigateur, et un autre moteur servi par la même origine.
 const OTHER_NS = 'cd'.repeat(32);
@@ -79,8 +91,8 @@ const CAPABILITY_NAMES = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 
   'export.drive', 'media.need', 'media.ranges', 'pick.drive', 'command', 'storage.ns', 'storage.memory',
   'storage.purge', 'live.lang', 'live.theme', 'font.inject', 'author'];
 // Capacités que ce scénario exerce : le moteur ne doit en annoncer aucune autre.
-const EXERCISED = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 'doc.request-save', 'storage.ns', 'storage.purge', 'live.lang',
-  'live.theme', 'command'];
+const EXERCISED = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 'doc.request-save', 'export.drive', 'storage.ns', 'storage.purge',
+  'live.lang', 'live.theme', 'command'];
 // LUM-10 : commandes de la liste blanche du moteur qui ouvrent un dialogue, et commandes réelles du
 // moteur hors liste (sans dialogue ni effet sur le document).
 const DIALOG_COMMANDS = ['file.new', 'file.export.exportAs', 'edit.keyboardShortcuts'];
@@ -120,6 +132,10 @@ export const BANC_SABOTAGES = [
   { tag: 'ehp:saved-ack-late-edit', kind: 'message' },
   { tag: 'ehp:reload-same-docref', kind: 'message' },
   { tag: 'ehp:beforeunload', kind: 'document', at: 'départ:garde' },
+  { tag: 'ehp:export-png', kind: 'message' },
+  { tag: 'ehp:export-refused', kind: 'message' },
+  { tag: 'ehp:save-as-adopt', kind: 'message' },
+  { tag: 'ehp:local-doc-first-save', kind: 'message' },
 ];
 // Témoin « moteur » (removeItem, clear et deleteDatabase sans effet) : les rouges attendus, chacun à
 // son contrôle. Les restes non effacés font aussi rougir les témoins de purge et la réécriture : ce
@@ -310,7 +326,7 @@ export function parentPage(engineSrc, foreignOrigin, parentOrigin) {
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Evora : coquille minimale du test de fumée</title>
 <link rel="icon" href="data:,"></head><body style="margin:0;background:#fff">
 <iframe id="engine" src="${engineSrc}" width="1280" height="800" style="border:0;display:block"
- sandbox="allow-scripts allow-same-origin" allow="fullscreen; clipboard-read; clipboard-write"></iframe>
+ sandbox="allow-scripts allow-same-origin allow-downloads" allow="fullscreen; clipboard-read; clipboard-write"></iframe>
 <iframe id="foreign" src="${w(foreignOrigin)}" width="8" height="8" style="border:0"></iframe>
 <iframe id="sibling" src="${w(parentOrigin)}" width="8" height="8" style="border:0"></iframe>
 <script src="/harness.js"></script>
@@ -591,11 +607,17 @@ export class EhpBench {
 
   // Ctrl+<key> dans le document moteur, renouvelé tant que pred n'est pas observé.
   async press(key, pred, what) {
+    return this.pressExpr(shortcut(key), `Ctrl+${key.toUpperCase()}`, pred, what);
+  }
+
+  // Une touche (expression évaluée dans le document moteur), renouvelée tant que pred n'est pas
+  // observé chez un message du moteur (jamais un message fabriqué par le témoin « banc »).
+  async pressExpr(expr, label, pred, what) {
     for (let attempt = 1; attempt <= 3; attempt++) {
-      const focused = await this.evaluate(this.frame(), shortcut(key), true);
-      const hit = await this.waitEngine(pred, 5000);
+      const focused = await this.evaluate(this.frame(), expr, true);
+      const hit = await this.waitEngine((m) => pred(m) && !this.injectedIds.includes(m.id), 5000);
       if (hit) return hit;
-      this.log(`[ehp] Ctrl+${key.toUpperCase()} (essai ${attempt}, canvas focalisé : ${focused}) : ${what} non observé`);
+      this.log(`[ehp] ${label} (essai ${attempt}, canvas focalisé : ${focused}) : ${what} non observé`);
     }
     return null;
   }
@@ -669,6 +691,7 @@ export class EhpBench {
     if (st.theme !== 'evora') this.fail('theme', `thème enregistré après evora:theme dark : ${st.theme}, attendu evora (${STORAGE_NS.slice(0, 8)}…:${PREFS})`);
     if (st.language !== 'de') this.fail('lang', `langue enregistrée après evora:lang de : ${st.language}, attendue de (${STORAGE_NS.slice(0, 8)}…:${PREFS})`);
     await this.savedAck();
+    await this.exports();
     await this.commands();
     await this.storagePhases(st);
   }
@@ -739,6 +762,112 @@ export class EhpBench {
         this.fail('reload-same-docref', `demande après le rechargement : attendu evora:ack « clean », reçu ${JSON.stringify(ack && ack.msg)}`);
       }
     }
+  }
+
+  // LUM-03 : export.drive, Enregistrer sous et premier enregistrement d'un document du moteur, sans
+  // aucun téléchargement. Les fenêtres du journal (verify) : aucun evora:export après un refus ;
+  // plus aucun message pour l'ancien docRef après l'adoption.
+  async exports() {
+    const zip = (p) => p && p.bytes && p.bytes.$arrayBuffer > 0 && p.bytes.head === '504b0304';
+    // export-png : Export As du document de la coquille.
+    const png = await this.exportAs('export-png');
+    if (png) {
+      const p = png.msg.payload || {};
+      if (p.docRef !== DOC_REF || p.name !== 'evora-smoke.png' || p.mime !== 'image/png' || !p.bytes || p.bytes.head !== '89504e47') {
+        this.fail('export-png', `evora:export inattendu (docRef, nom, MIME, octets PNG) : ${JSON.stringify(p)}`);
+      }
+      await this.send('evora:ack', '{ ok: true }', { re: png.msg.id });
+    }
+    await this.sabotage('export-png', 'evora:export aux octets en vue typée',
+      `{ v: 1, type: 'evora:export', payload: { docRef: ${JSON.stringify(DOC_REF)}, name: 'evora-smoke.png', mime: 'image/png', bytes: new Uint8Array(4) } }`);
+    // export-refused : un second export, refusé par la coquille (quota).
+    const second = await this.exportAs('export-refused');
+    if (second) {
+      const refusal = await this.send('evora:ack', `{ ok: false, code: 'quota' }`, { re: second.msg.id });
+      await this.sabotage('export-refused', 'evora:export renvoyé après le refus',
+        `{ v: 1, type: 'evora:export', payload: { docRef: ${JSON.stringify(DOC_REF)}, name: 'evora-smoke.png', mime: 'image/png', bytes: new ArrayBuffer(8) } }`);
+      await sleep(3000);
+      const r = await this.stats();
+      this.windows.push({ kind: 'export', tag: 'export-refused', what: 'après le refus de l\'export', from: refusal, to: this.ids.lastCommand });
+      if (!r) this.fail('export-refused', 'le moteur ne répond plus (diag.stats) après le refus de l\'export');
+    }
+    // save-as-adopt : Enregistrer sous (Ctrl+Maj+S), puis adoption du nouveau docRef.
+    const savesBefore = new Set(this.engineMessages().filter((e) => e.msg.type === 'evora:save').map((e) => e.msg.id));
+    const saveAs = await this.pressExpr(keyPress('S', 'KeyS', { ctrl: true, shift: true }), 'Ctrl+Maj+S',
+      (m) => m.type === 'evora:save' && !savesBefore.has(m.id), 'evora:save (Enregistrer sous)');
+    if (!saveAs) this.fail('save-as-adopt', 'aucun evora:save après Ctrl+Maj+S (Fichier › Enregistrer sous)');
+    else {
+      const p = saveAs.msg.payload || {};
+      if (p.saveAs !== true || p.docRef !== DOC_REF || p.name !== 'evora-smoke.pcraft' || !zip(p)) {
+        this.fail('save-as-adopt', `evora:save d'Enregistrer sous inattendu (saveAs, docRef d'origine, nom .pcraft, octets zip) : ${JSON.stringify(p)}`);
+      }
+      const adopted = await this.saved(saveAs.msg.id, { ok: true, version: 1, docRef: ADOPT_REF });
+      this.windows.push({ kind: 'ref', tag: 'save-as-adopt', what: 'après l\'adoption du nouveau docRef', from: adopted, docRef: DOC_REF });
+      await this.sabotage('save-as-adopt', 'evora:dirty de l\'ancien docRef après l\'adoption',
+        `{ v: 1, type: 'evora:dirty', payload: { dirty: true, docRef: ${JSON.stringify(DOC_REF)} } }`);
+      if (!(await this.until(() => this.dirtyAfter(adopted, false, ADOPT_REF), 10000))) this.fail('save-as-adopt', 'evora:dirty {dirty: false} du nouveau docRef absent après l\'adoption');
+      for (const [ref, want] of [[ADOPT_REF, 'clean'], [DOC_REF, 'not_found']]) {
+        const id = await this.send('evora:request-save', `{ reason: 'user', docRef: ${JSON.stringify(ref)} }`);
+        const ack = await this.waitEngine((m) => m.re === id && !this.injectedIds.includes(m.id), 15000);
+        if (!ack || ack.msg.type !== 'evora:ack' || ack.msg.payload.code !== want) {
+          this.fail('save-as-adopt', `demande d'enregistrement de ${ref === ADOPT_REF ? 'l\'adopté' : 'l\'ancien'} docRef : attendu « ${want} », reçu ${JSON.stringify(ack && ack.msg)}`);
+        }
+      }
+    }
+    // local-doc-first-save : un document du moteur (file.new, Entrée), puis Ctrl+S.
+    const local = await this.newLocalDocument();
+    if (!local) {
+      this.fail('local-doc-first-save', 'document du moteur non créé (file.new, Entrée)');
+    } else {
+      const before = new Set(this.engineMessages().filter((e) => e.msg.type === 'evora:save').map((e) => e.msg.id));
+      const first = await this.press('s', (m) => m.type === 'evora:save' && !before.has(m.id), 'evora:save (Ctrl+S, document du moteur)');
+      if (!first) this.fail('local-doc-first-save', 'aucun evora:save après Ctrl+S sur un document du moteur');
+      else {
+        const p = first.msg.payload || {};
+        if (p.saveAs !== true || !ULID_RE.test(p.docRef || '') || !/\.pcraft$/.test(p.name || '') || !zip(p)) {
+          this.fail('local-doc-first-save', `premier enregistrement d'un document du moteur inattendu (saveAs, .pcraft, octets zip) : ${JSON.stringify(p)}`);
+        }
+        const adopted = await this.saved(first.msg.id, { ok: true, version: 1, docRef: LOCAL_REF });
+        await this.sabotage('local-doc-first-save', 'evora:save {saveAs: true} hors .pcraft',
+          `{ v: 1, type: 'evora:save', payload: { docRef: ${JSON.stringify(ADOPT_REF)}, name: 'Untitled-1.psd', saveAs: true, bytes: new ArrayBuffer(8) } }`);
+        if (!(await this.until(() => this.dirtyAfter(adopted, false, LOCAL_REF), 10000))) this.fail('local-doc-first-save', 'evora:dirty {dirty: false} du nouveau document absent');
+        const r = await this.stats();
+        if (!r || !r.open.some((d) => d.docRef === LOCAL_REF)) this.fail('local-doc-first-save', `document adopté absent de diag.stats : ${JSON.stringify(r && r.open)}`);
+      }
+    }
+  }
+
+  // Export As du document actif (commande file.export.exportAs, puis Entrée) ; rend l'evora:export
+  // reçu, ou null (le dialogue resté ouvert est refermé).
+  async exportAs(tag) {
+    const before = new Set(this.engineMessages().filter((e) => e.msg.type === 'evora:export').map((e) => e.msg.id));
+    const ack = await this.command('file.export.exportAs');
+    if (!ack || ack.ok !== true) {
+      this.fail(tag, `Export As non ouvert : ${JSON.stringify(ack)}`);
+      return null;
+    }
+    await sleep(800);
+    const hit = await this.pressExpr(keyPress('Enter', 'Enter'), 'Entrée', (m) => m.type === 'evora:export' && !before.has(m.id), 'evora:export (Export As)');
+    if (hit) return hit;
+    this.fail(tag, 'aucun evora:export après Export As (Entrée)');
+    const r = await this.stats();
+    if (r && r.dialogs > 0) await this.evaluate(this.frame(), keyPress('Escape', 'Escape'), true);
+    return null;
+  }
+
+  // Un document du moteur : file.new, puis Entrée dans son dialogue ; vrai s'il est créé.
+  async newLocalDocument() {
+    const before = await this.stats();
+    const ack = await this.command('file.new');
+    if (!before || !ack || ack.ok !== true) return false;
+    await sleep(800);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await this.evaluate(this.frame(), keyPress('Enter', 'Enter'), true);
+      await sleep(800);
+      const r = await this.stats();
+      if (r && r.documents === before.documents + 1 && r.dialogs === before.dialogs) return true;
+    }
+    return false;
   }
 
   // evora:request-save du document ; rend l'id de l'evora:save qui y répond, ou null. Le document
@@ -837,6 +966,7 @@ export class EhpBench {
   async command(command, refused = false) {
     const id = await this.send('evora:command', `{ command: ${JSON.stringify(command)}, params: {} }`);
     this.ids.commands.push({ id, command, refused });
+    this.ids.lastCommand = id;
     const ack = await this.waitEngine((m) => m.type === 'evora:ack' && m.re === id && !this.injectedIds.includes(m.id), 15000);
     return ack ? ack.msg.payload : null;
   }
@@ -1067,6 +1197,17 @@ export class EhpBench {
             || /[\\/\u0000-\u001f\u007f]/.test(p.name) || typeof p.saveAs !== 'boolean' || !(b.$arrayBuffer >= 1) || b.$shared !== undefined || b.$view !== undefined) {
             this.fail('save-shape', `evora:save non conforme : ${where}`);
           }
+          // LUM-03 : un nouveau document de la coquille est toujours un .pcraft.
+          if (p && p.saveAs === true && !/\.pcraft$/.test(p.name || '')) this.fail('local-doc-first-save', `evora:save {saveAs: true} hors .pcraft : ${where}`);
+          break;
+        }
+        case 'evora:export': {
+          const b = (p && p.bytes) || {};
+          if (m.re !== undefined || !only(['docRef', 'name', 'mime', 'bytes']) || (p.docRef !== undefined && !ULID_RE.test(p.docRef)) || typeof p.name !== 'string'
+            || !p.name.length || /[\\/\u0000-\u001f\u007f]/.test(p.name) || typeof p.mime !== 'string' || p.mime.length > 120 || !MIME_RE.test(p.mime)
+            || !(b.$arrayBuffer >= 1) || b.$shared !== undefined || b.$view !== undefined) {
+            this.fail('export-png', `evora:export non conforme : ${where}`);
+          }
           break;
         }
         case 'evora:failed':
@@ -1105,9 +1246,14 @@ export class EhpBench {
       const from = this.logIndex(w.from);
       if (from < 0) continue;
       const to = w.to ? this.logIndex(w.to) : -1;
-      const wrong = this.state.log.slice(from + 1, to < 0 ? undefined : to).filter((e) => e.fromEngine && e.plain && e.msg.type === 'evora:dirty'
-        && e.msg.payload && e.msg.payload.dirty === false && e.msg.payload.docRef === w.docRef);
-      if (wrong.length) this.fail(w.tag, `${w.what} : evora:dirty {dirty: false} reçu (${wrong.map((e) => e.msg.id).join(', ')})`);
+      // Fenêtres de LUM-03 : aucun evora:export après un refus ('export') ; plus aucun message pour
+      // l'ancien docRef après une adoption ('ref', jusqu'à la fin du journal).
+      const bad = {
+        export: (e) => e.msg.type === 'evora:export',
+        ref: (e) => !!e.msg.payload && e.msg.payload.docRef === w.docRef,
+      }[w.kind] || ((e) => e.msg.type === 'evora:dirty' && e.msg.payload && e.msg.payload.dirty === false && e.msg.payload.docRef === w.docRef);
+      const wrong = this.state.log.slice(from + 1, to < 0 ? undefined : to).filter((e) => e.fromEngine && e.plain && e.msg && bad(e));
+      if (wrong.length) this.fail(w.tag, `${w.what} : ${w.kind === 'export' ? 'evora:export' : w.kind === 'ref' ? `message pour ${w.docRef}` : 'evora:dirty {dirty: false}'} reçu (${wrong.map((e) => e.msg.id).join(', ')})`);
     }
     // LUM-04 (d, S-ACK-6) : un seul accusé, positif, du rechargement du même docRef.
     if (this.ids.reload) {

@@ -33,6 +33,8 @@
 //! document as `evora:save`, a new `.pcraft` document as `evora:save {saveAs: true}` (its new
 //! `docRef` adopted from `evora:saved`), anything else as `evora:export` (`export.drive`, one
 //! message per file, under `maxExportBytes`), whose `evora:ack` is read.
+//! Patch LUM-12: `evora:open {new: true}` opens the engine's New Document dialog for the host's
+//! `docRef` (`host_docs`).
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -117,6 +119,8 @@ pub struct Init {
 pub enum HostEvent {
     /// `evora:open` with bytes: a document to open under the host's `docRef`.
     Open { id: String, doc_ref: String, name: String, bytes: Vec<u8> },
+    /// `evora:open {docRef, name, new: true}`: a blank document of the host (patch LUM-12).
+    OpenNew { id: String, doc_ref: String, name: String },
     /// `evora:request-save`: the named document, or (no `docRef`) the host's document.
     RequestSave { id: String, doc_ref: Option<String> },
     /// `evora:theme`: dark or light.
@@ -582,10 +586,10 @@ impl Bridge {
                 }
                 return;
             }
-            // A blank document from the host: not supported yet.
+            // A blank document from the host (patch LUM-12): the engine's New Document dialog.
             ["new"] => {
                 if get(p, "new").as_bool() == Some(true) {
-                    self.ack(id, false, Some("unsupported"));
+                    self.push(HostEvent::OpenNew { id: id.to_owned(), doc_ref, name });
                 }
                 return;
             }

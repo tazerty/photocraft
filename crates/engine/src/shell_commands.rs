@@ -81,15 +81,15 @@ pub const SHELL_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.theme.breezeDark", "Breeze Dark Theme", &["Window", "Theme"], None),
     ("window.theme.softLight", "Soft Light Theme", &["Window", "Theme"], None),
     ("window.theme.softDark", "Soft Dark Theme", &["Window", "Theme"], None),
+    // Evora build (patch E2, exception X-L5-02 declared in apps/lumbra/UPSTREAM.md).
+    ("window.theme.evora", "Evora Theme", &["Window", "Theme"], None),
+    ("window.theme.evoraLight", "Evora Light Theme", &["Window", "Theme"], None),
     ("window.theme.system", "Sync with system", &["Window", "Theme"], None),
     ("edit.search", "Search…", &["Edit"], Some("Cmd+F")),
-    ("help.discord", "Join the ArtCraft Discord…", &["Help"], None),
-    ("help.website", "PhotoCraft Website", &["Help"], None),
-    ("help.artcraftWebsite", "ArtCraft Website", &["Help"], None),
-    ("help.github", "PhotoCraft on GitHub", &["Help"], None),
-    ("help.reportIssue", "Report an Issue…", &["Help"], None),
+    // Evora build (patch E1, exception X-L5-02): the upstream Discord, website, GitHub and
+    // issue-tracker items are removed, so no third-party brand is shown or opened.
     ("help.systemInfo", "System Info…", &["Help"], None),
-    ("help.about", "About PhotoCraft", &["Help"], None),
+    ("help.about", "About Lumbra", &["Help"], None),
 ];
 
 /// The tools, in toolbar order: shortcut id (`tools.select.<tool>`), Photoshop's name for it

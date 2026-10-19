@@ -70,4 +70,10 @@ unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # craft-ui (storytold/craft-libs, Apache-2.0), épinglée par révision dans Cargo.lock.
-allow-git = ["https://github.com/storytold/craft-libs"]
+# Depuis v0.10.0 (EVORA-LUM-49) : craft-print (craft-libs) dépend sans condition de
+# craft-winprint-gdi (storytold/winprint.rs, MIT OR Apache-2.0, révision 417ac3c4 épinglée par
+# craft-print et Cargo.lock). Sur wasm32, seuls ses types et des fonctions qui répondent
+# « Unsupported » sont compilés : son module Win32 et sa seule dépendance (windows-sys) sont
+# réservés à cfg(windows), et unsafe_code y est refusé hors de ce module. Même organisation que
+# craft-libs ; l'amont pdfcraft admet ce dépôt dans son propre deny.toml.
+allow-git = ["https://github.com/storytold/craft-libs", "https://github.com/storytold/winprint.rs"]

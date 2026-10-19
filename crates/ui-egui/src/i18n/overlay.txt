@@ -43,6 +43,8 @@ sub	*	Adobe RGB (1998)	ClayRGB (1998)
 sub	*	Adobe RGB	ClayRGB
 sub	*	Adobe rgb	ClayRGB
 sub	*	Adobe-rgb	ClayRGB
+# v0.10.0 (EVORA-LUM-48): the German name of the compatible built-in profile, « Adobe-RGB-kompatibel ».
+sub	*	Adobe-RGB	ClayRGB
 
 # Paragraph composers and PDF presets: the generic names.
 sub	hu	Adobe egysoros	Egysoros

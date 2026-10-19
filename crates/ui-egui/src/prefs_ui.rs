@@ -2116,7 +2116,7 @@ fn set_row(
         Some(s) => *s != now,
         None => now != ShortcutSet::default(),
     };
-    let defaults = tl!("PhotoCraft Defaults").to_string();
+    let defaults = tl!("Lumbra Defaults").to_string();
     let shown = |name: &str| -> String {
         let base = if name.is_empty() { defaults.clone() } else { name.to_string() };
         if name == active && modified { crate::i18n::fmt(tl!("{set} (modified)"), &[("set", &base)]) } else { base }

@@ -635,8 +635,9 @@ impl Bridge {
             return;
         }
         self.0.borrow_mut().pending_saves.retain(|s| s != re);
-        // TÉMOIN SABORDÉ (EVORA-LUM-36, retiré à l'octet par EVORA-LUM-37) : evora:saved ignoré.
-        let _ = (ok, &doc_ref);
+        if self.has("doc.saved-ack") {
+            self.push(HostEvent::Saved { re: re.to_owned(), ok, doc_ref: doc_ref.as_string() });
+        }
     }
 
     /// `evora:ack {ok, code?}` answering an `evora:export` (patch LUM-03, §7.4): the export is

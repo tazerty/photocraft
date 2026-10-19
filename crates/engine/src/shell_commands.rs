@@ -74,6 +74,8 @@ pub const SHELL_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.theme.adwaitaDark", "Adwaita", &["Window", "Theme", "Dark Theme"], None),
     ("window.theme.breezeDark", "Breeze", &["Window", "Theme", "Dark Theme"], None),
     ("window.theme.softDark", "Soft", &["Window", "Theme", "Dark Theme"], None),
+    // Evora build (patch E2, exception X-L5-02 declared in apps/lumbra/UPSTREAM.md).
+    ("window.theme.evora", "Evora", &["Window", "Theme", "Dark Theme"], None),
     ("window.theme.proLightGray", "Pro Light Gray", &["Window", "Theme", "Light Theme"], None),
     ("window.theme.proLight", "Pro Light", &["Window", "Theme", "Light Theme"], None),
     ("window.theme.studioLight", "Studio", &["Window", "Theme", "Light Theme"], None),
@@ -81,15 +83,14 @@ pub const SHELL_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.theme.adwaita", "Adwaita", &["Window", "Theme", "Light Theme"], None),
     ("window.theme.breezeLight", "Breeze", &["Window", "Theme", "Light Theme"], None),
     ("window.theme.softLight", "Soft", &["Window", "Theme", "Light Theme"], None),
+    // Evora build (patch E2, exception X-L5-02).
+    ("window.theme.evoraLight", "Evora", &["Window", "Theme", "Light Theme"], None),
     ("window.theme.system", "Sync with system", &["Window", "Theme"], None),
     ("edit.search", "Search…", &["Edit"], Some("Cmd+F")),
-    ("help.discord", "Join the ArtCraft Discord…", &["Help"], None),
-    ("help.website", "PhotoCraft Website", &["Help"], None),
-    ("help.artcraftWebsite", "ArtCraft Website", &["Help"], None),
-    ("help.github", "PhotoCraft on GitHub", &["Help"], None),
-    ("help.reportIssue", "Report an Issue…", &["Help"], None),
+    // Evora build (patch E1, exception X-L5-02): the upstream Discord, website, GitHub and
+    // issue-tracker items are removed, so no third-party brand is shown or opened.
     ("help.systemInfo", "System Info…", &["Help"], None),
-    ("help.about", "About PhotoCraft", &["Help"], None),
+    ("help.about", "About Lumbra", &["Help"], None),
 ];
 
 /// The tools, in toolbar order: shortcut id (`tools.select.<tool>`), Photoshop's name for it

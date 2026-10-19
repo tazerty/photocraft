@@ -161,7 +161,7 @@ pub fn intercept_filter(app: &mut PhotocraftApp, id: &str, params: &Value) -> Op
     }
     let mut f = Map::new();
     f.insert(MARK.into(), json!(Kind::Type.key()));
-    f.insert("__label".into(), json!("PhotoCraft"));
+    f.insert("__label".into(), json!("Lumbra"));
     f.insert("message".into(), json!(Kind::Type.message()));
     f.insert("layer".into(), json!(layer.0));
     f.insert("filter".into(), json!(id));

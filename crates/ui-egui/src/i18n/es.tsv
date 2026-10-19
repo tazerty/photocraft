@@ -3386,7 +3386,7 @@ layerLabel	No Color	Sin color
 	Restart Required	Es necesario reiniciar
 	Restart	Reiniciar
 	Quit	Salir
-	Quit PhotoCraft	Salir de PhotoCraft
+	Quit Lumbra	Salir de Lumbra
 	Close Window	Cerrar ventana
 	New Window	Nueva ventana
 	Open Image	Abrir imagen
@@ -3582,7 +3582,6 @@ layerLabel	No Color	Sin color
 	Custom Pixel Aspect Ratio	Relación de aspecto de píxel personalizada
 	32-bit Preview Options	Opciones de vista previa de 32 bits
 	New Guide	Nueva guía
-	Join the ArtCraft Discord	Únase al Discord de ArtCraft
 	Report an Issue	Informar de un problema
 	Load Files into Stack	Cargar archivos en pila
 	Statistics	Estadísticas
@@ -3879,7 +3878,7 @@ layerLabel	No Color	Sin color
 	Mezzotint	Grabado
 	Mosaic	Mosaico
 	Motion Blur	Desenfoque de movimiento
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Arrastrar y soltar archivos de forma nativa aún no es compatible con Wayland. Use Archivo › Abrir o ejecute PhotoCraft mediante XWayland con `WAYLAND_DISPLAY= photocraft`.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run Lumbra under XWayland with `WAYLAND_DISPLAY= photocraft`.	Arrastrar y soltar archivos de forma nativa aún no es compatible con Wayland. Use Archivo › Abrir o ejecute Lumbra mediante XWayland con `WAYLAND_DISPLAY= photocraft`.
 	Neon Glow	Resplandor de neón
 	New Guide Layout	Nuevo diseño de guías
 	New Video Layer from File	Nueva capa de vídeo desde archivo
@@ -4053,9 +4052,9 @@ layerLabel	No Color	Sin color
 	Saved {path}; image assets: {n} in {dir}	Se guardó {path}; recursos de imagen: {n} en {dir}
 	{message} (notes: {n}; {warning})	{message} (notas: {n}; {warning})
 	Preferences can't be saved	No se pueden guardar las preferencias
-	PhotoCraft keeps retrying; until a save succeeds, preference changes are lost when it closes.	PhotoCraft seguirá intentándolo; hasta que el guardado se complete, los cambios de preferencias se perderán al cerrar.
+	Lumbra keeps retrying; until a save succeeds, preference changes are lost when it closes.	Lumbra seguirá intentándolo; hasta que el guardado se complete, los cambios de preferencias se perderán al cerrar.
 	GPU retry scheduled	Reintento de GPU programado
-	Save your work and restart PhotoCraft to retry GPU acceleration. CPU rendering remains active for this session.	Guarde su trabajo y reinicie PhotoCraft para volver a intentar la aceleración por GPU. La interpretación por CPU seguirá activa durante esta sesión.
+	Save your work and restart Lumbra to retry GPU acceleration. CPU rendering remains active for this session.	Guarde su trabajo y reinicie Lumbra para volver a intentar la aceleración por GPU. La interpretación por CPU seguirá activa durante esta sesión.
 	GPU device was lost; using the CPU renderer.	Se perdió el dispositivo GPU; se usará el renderizador por CPU.
 	GPU error; using the CPU renderer.	Error de GPU; se usará el renderizador por CPU.
 	Couldn't open {name}: {error}	No se pudo abrir {name}: {error}
@@ -4115,7 +4114,6 @@ layerLabel	No Color	Sin color
 navigator	Zoom	Zoom
 	Apply {option}: {state}	Aplicar {option}: {state}
 	This adjustment ({key}) is kept as imported and can't be edited yet.	Este ajuste ({key}) se conserva como se importó y aún no puede editarse.
-	Join the ArtCraft Discord ({url})	Unirse al Discord de ArtCraft ({url})
 	{index} of {total}	{index} de {total}
 	{shortcut} assigned.	{shortcut} asignado.
 	{shortcut} is already in use by {commands} and will be removed from it when you click OK.	{shortcut} ya está en uso por {commands} y se quitará al hacer clic en Aceptar.
@@ -4169,7 +4167,7 @@ navigator	Zoom	Zoom
 	{name} (Photoshop)	{name} (Photoshop)
 	{message} ({note})	{message} ({note})
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	Se cargó {n} acción de {file}|Se cargaron {n} acciones de {file}
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} paso aún no tiene equivalente en PhotoCraft|{n} pasos aún no tienen equivalente en PhotoCraft
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} paso aún no tiene equivalente en Lumbra|{n} pasos aún no tienen equivalente en Lumbra
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	Se guardó {n} acción en {file}|Se guardaron {n} acciones en {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	{n} paso sin equivalente en Photoshop omitido|{n} pasos sin equivalente en Photoshop omitidos
 
@@ -4250,7 +4248,7 @@ navigator	Zoom	Zoom
 	Nothing to paste: PhotoCraft can't read the system clipboard here	Nada que pegar: PhotoCraft no puede leer aquí el portapapeles del sistema
 	Delete this set	Eliminar este conjunto
 	New Set…	Nuevo conjunto…
-	PhotoCraft Defaults	Valores por defecto de PhotoCraft
+	Lumbra Defaults	Valores por defecto de Lumbra
 	Save a list of these shortcuts as a web page	Guardar una lista de estos métodos abreviados como página web
 	Save the changes to this set	Guardar los cambios en este conjunto
 	Save these shortcuts as a .kys file	Guardar estos métodos abreviados como archivo .kys

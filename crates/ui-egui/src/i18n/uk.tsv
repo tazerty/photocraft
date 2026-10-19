@@ -3906,7 +3906,7 @@ curves	Smooth	Згладити
 	{name} (Photoshop)	{name} (Photoshop)
 	{message} ({note})	{message} ({note})
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	Завантажено {n} операцію з {file}|Завантажено {n} операції з {file}|Завантажено {n} операцій з {file}
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} крок ще не має відповідника в PhotoCraft|{n} кроки ще не мають відповідника в PhotoCraft|{n} кроків ще не мають відповідника в PhotoCraft
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} крок ще не має відповідника в Lumbra|{n} кроки ще не мають відповідника в Lumbra|{n} кроків ще не мають відповідника в Lumbra
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	Збережено {n} операцію до {file}|Збережено {n} операції до {file}|Збережено {n} операцій до {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Пропущено {n} крок без відповідника в Photoshop|Пропущено {n} кроки без відповідника в Photoshop|Пропущено {n} кроків без відповідника в Photoshop
 
@@ -3987,7 +3987,7 @@ curves	Smooth	Згладити
 	Nothing to paste: PhotoCraft can't read the system clipboard here	Нічого вставити: тут PhotoCraft не може прочитати системний буфер обміну
 	Delete this set	Видалити цей набір
 	New Set…	Новий набір…
-	PhotoCraft Defaults	Стандартні PhotoCraft
+	Lumbra Defaults	Стандартні Lumbra
 	Save a list of these shortcuts as a web page	Зберегти список цих клавіатурних скорочень як вебсторінку
 	Save the changes to this set	Зберегти зміни в цьому наборі
 	Save these shortcuts as a .kys file	Зберегти ці клавіатурні скорочення як файл .kys

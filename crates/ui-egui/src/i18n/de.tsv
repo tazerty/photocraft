@@ -2834,7 +2834,6 @@ curves	Smooth	Glätten
 	Light Gray	Hellgrau
 	Stop	Stopp
 # Status messages, system info and tool names
-	Join the ArtCraft Discord ({url})	Dem ArtCraft-Discord beitreten ({url})
 	Nothing to paste: the clipboard holds no image	Nichts einzufügen: Die Zwischenablage enthält kein Bild
 	Graphics adapter: {adapter}	Grafikadapter: {adapter}
 	Backend: {backend} ({type})	Backend: {backend} ({type})
@@ -3221,7 +3220,7 @@ curves	Smooth	Glätten
 	{name} (Photoshop)	{name} (Photoshop)
 	{message} ({note})	{message} ({note})
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	{n} Aktion aus {file} geladen|{n} Aktionen aus {file} geladen
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} Schritt hat noch keine Entsprechung in PhotoCraft|{n} Schritte haben noch keine Entsprechung in PhotoCraft
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} Schritt hat noch keine Entsprechung in Lumbra|{n} Schritte haben noch keine Entsprechung in Lumbra
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	{n} Aktion in {file} gespeichert|{n} Aktionen in {file} gespeichert
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	{n} Schritt ohne Photoshop-Entsprechung ausgelassen|{n} Schritte ohne Photoshop-Entsprechung ausgelassen
 
@@ -3306,7 +3305,7 @@ curves	Smooth	Glätten
 	Nothing to paste: PhotoCraft can't read the system clipboard here	Nichts einzufügen: PhotoCraft kann die Systemzwischenablage hier nicht lesen
 	Delete this set	Diesen Satz löschen
 	New Set…	Neuer Satz…
-	PhotoCraft Defaults	PhotoCraft-Standard
+	Lumbra Defaults	Lumbra-Standard
 	Save a list of these shortcuts as a web page	Liste dieser Kurzbefehle als Webseite speichern
 	Save the changes to this set	Änderungen in diesem Satz speichern
 	Save these shortcuts as a .kys file	Diese Kurzbefehle als .kys-Datei speichern

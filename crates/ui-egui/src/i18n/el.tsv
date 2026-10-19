@@ -3904,7 +3904,7 @@ curves	Smooth	Εξομάλυνση
 	{name} (Photoshop)	{name} (Photoshop)
 	{message} ({note})	{message} ({note})
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	Φορτώθηκε {n} ενέργεια από το {file}|Φορτώθηκαν {n} ενέργειες από το {file}
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} βήμα δεν έχει ακόμη αντίστοιχο στο PhotoCraft|{n} βήματα δεν έχουν ακόμη αντίστοιχο στο PhotoCraft
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} βήμα δεν έχει ακόμη αντίστοιχο στο Lumbra|{n} βήματα δεν έχουν ακόμη αντίστοιχο στο Lumbra
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	Αποθηκεύτηκε {n} ενέργεια στο {file}|Αποθηκεύτηκαν {n} ενέργειες στο {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Παραλείφθηκε {n} βήμα χωρίς αντίστοιχο στο Photoshop|Παραλείφθηκαν {n} βήματα χωρίς αντίστοιχο στο Photoshop
 
@@ -3987,7 +3987,7 @@ curves	Smooth	Εξομάλυνση
 	Nothing to paste: PhotoCraft can't read the system clipboard here	Τίποτα για επικόλληση: το PhotoCraft δεν μπορεί να διαβάσει εδώ το πρόχειρο του συστήματος
 	Delete this set	Διαγραφή αυτού του συνόλου
 	New Set…	Νέο σύνολο…
-	PhotoCraft Defaults	Προεπιλογές PhotoCraft
+	Lumbra Defaults	Προεπιλογές Lumbra
 	Save a list of these shortcuts as a web page	Αποθήκευση λίστας αυτών των συντομεύσεων ως ιστοσελίδας
 	Save the changes to this set	Αποθήκευση των αλλαγών σε αυτό το σύνολο
 	Save these shortcuts as a .kys file	Αποθήκευση αυτών των συντομεύσεων ως αρχείου .kys

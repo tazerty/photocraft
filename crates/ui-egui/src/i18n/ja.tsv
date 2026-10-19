@@ -3815,7 +3815,7 @@ curves	Smooth	スムーズ
 	{name} (Photoshop)	{name}（Photoshop）
 	{message} ({note})	{message}（{note}）
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	{file} からアクション {n} 個を読み込みました
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} 個のステップにはまだ PhotoCraft の対応機能がありません
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} 個のステップにはまだ Lumbra の対応機能がありません
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	{file} にアクション {n} 個を保存しました
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Photoshop に対応するもののない {n} 個のステップを省きました
 
@@ -3964,7 +3964,7 @@ curves	Smooth	スムーズ
 	Nothing to paste: PhotoCraft can't read the system clipboard here	貼り付けるものがありません: ここでは PhotoCraft がシステムのクリップボードを読み取れません
 	Delete this set	このセットを削除
 	New Set…	新規セット…
-	PhotoCraft Defaults	PhotoCraft 初期設定
+	Lumbra Defaults	Lumbra 初期設定
 	Save a list of these shortcuts as a web page	これらのショートカットの一覧を Web ページとして保存
 	Save the changes to this set	このセットへの変更を保存
 	Save these shortcuts as a .kys file	これらのショートカットを .kys ファイルとして保存

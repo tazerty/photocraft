@@ -3214,7 +3214,7 @@ curves	Smooth	Lisser
 	{name} (Photoshop)	{name} (Photoshop)
 	{message} ({note})	{message} ({note})
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	{n} action chargée depuis {file}|{n} actions chargées depuis {file}
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} étape n’a pas encore d’équivalent dans PhotoCraft|{n} étapes n’ont pas encore d’équivalent dans PhotoCraft
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} étape n’a pas encore d’équivalent dans Lumbra|{n} étapes n’ont pas encore d’équivalent dans Lumbra
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	{n} action enregistrée dans {file}|{n} actions enregistrées dans {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	{n} étape sans équivalent Photoshop omise|{n} étapes sans équivalent Photoshop omises
 
@@ -3296,7 +3296,7 @@ curves	Smooth	Lisser
 	Nothing to paste: PhotoCraft can't read the system clipboard here	Rien à coller : PhotoCraft ne peut pas lire ici le presse-papiers du système
 	Delete this set	Supprimer ce jeu
 	New Set…	Nouveau jeu…
-	PhotoCraft Defaults	Valeurs par défaut de PhotoCraft
+	Lumbra Defaults	Valeurs par défaut de Lumbra
 	Save a list of these shortcuts as a web page	Enregistrer la liste de ces raccourcis en page web
 	Save the changes to this set	Enregistrer les modifications de ce jeu
 	Save these shortcuts as a .kys file	Enregistrer ces raccourcis dans un fichier .kys

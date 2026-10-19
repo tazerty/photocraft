@@ -372,8 +372,8 @@ pub fn load_bytes(app: &mut PhotocraftApp, name: &str, bytes: &[u8]) -> Result<V
         let note = crate::i18n::trn(
             crate::i18n::current(),
             unsupported as u64,
-            "{n} step has no PhotoCraft equivalent yet",
-            "{n} steps have no PhotoCraft equivalent yet",
+            "{n} step has no Lumbra equivalent yet",
+            "{n} steps have no Lumbra equivalent yet",
         );
         let template = "{message} ({note})";
         crate::i18n::fmt(tl!(template), &[("message", &loaded), ("note", &note)])

@@ -3893,7 +3893,7 @@ cameraData	Lens	Lens
 	{name} (Photoshop)	{name} (Photoshop)
 	{message} ({note})	{message} ({note})
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	{file} dosyasından {n} eylem yüklendi
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} adımın PhotoCraft’ta henüz karşılığı yok
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} adımın Lumbra’da henüz karşılığı yok
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	{n} eylem {file} dosyasına kaydedildi
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Photoshop karşılığı olmayan {n} adım atlandı
 
@@ -3990,7 +3990,7 @@ cameraData	Lens	Lens
 	Nothing to paste: PhotoCraft can't read the system clipboard here	Yapıştırılacak bir şey yok: PhotoCraft burada sistem panosunu okuyamıyor
 	Delete this set	Bu Kümeyi Sil
 	New Set…	Yeni Küme…
-	PhotoCraft Defaults	PhotoCraft Varsayılanları
+	Lumbra Defaults	Lumbra Varsayılanları
 	Save a list of these shortcuts as a web page	Bu kısayolların listesini web sayfası olarak kaydet
 	Save the changes to this set	Bu kümedeki değişiklikleri kaydet
 	Save these shortcuts as a .kys file	Bu kısayolları .kys dosyası olarak kaydet

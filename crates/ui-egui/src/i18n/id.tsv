@@ -3217,7 +3217,7 @@ curves	Smooth	Haluskan
 	{name} (Photoshop)	{name} (Photoshop)
 	{message} ({note})	{message} ({note})
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	{n} tindakan dimuat dari {file}
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} langkah belum memiliki padanan di PhotoCraft
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} langkah belum memiliki padanan di Lumbra
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	{n} tindakan disimpan ke {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	{n} langkah tanpa padanan Photoshop dilewati
 
@@ -3299,7 +3299,7 @@ curves	Smooth	Haluskan
 	Nothing to paste: PhotoCraft can't read the system clipboard here	Tidak ada yang ditempel: PhotoCraft tidak dapat membaca papan klip sistem di sini
 	Delete this set	Hapus set ini
 	New Set…	Set Baru…
-	PhotoCraft Defaults	Bawaan PhotoCraft
+	Lumbra Defaults	Bawaan Lumbra
 	Save a list of these shortcuts as a web page	Simpan daftar pintasan ini sebagai halaman web
 	Save the changes to this set	Simpan perubahan ke set ini
 	Save these shortcuts as a .kys file	Simpan pintasan ini sebagai file .kys

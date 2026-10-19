@@ -3966,7 +3966,7 @@ curves	Smooth	Vloeiend maken
 	{name} (Photoshop)	{name} (Photoshop)
 	{message} ({note})	{message} ({note})
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	{n} handeling geladen uit {file}|{n} handelingen geladen uit {file}
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} stap heeft nog geen equivalent in PhotoCraft|{n} stappen hebben nog geen equivalent in PhotoCraft
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} stap heeft nog geen equivalent in Lumbra|{n} stappen hebben nog geen equivalent in Lumbra
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	{n} handeling opgeslagen in {file}|{n} handelingen opgeslagen in {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	{n} stap zonder Photoshop-equivalent weggelaten|{n} stappen zonder Photoshop-equivalent weggelaten
 
@@ -4047,7 +4047,7 @@ curves	Smooth	Vloeiend maken
 	Nothing to paste: PhotoCraft can't read the system clipboard here	Niets om te plakken: PhotoCraft kan het systeemklembord hier niet lezen
 	Delete this set	Deze set verwijderen
 	New Set…	Nieuwe set…
-	PhotoCraft Defaults	PhotoCraft-standaard
+	Lumbra Defaults	Lumbra-standaard
 	Save a list of these shortcuts as a web page	Een lijst van deze sneltoetsen als webpagina opslaan
 	Save the changes to this set	De wijzigingen in deze set opslaan
 	Save these shortcuts as a .kys file	Deze sneltoetsen als .kys-bestand opslaan

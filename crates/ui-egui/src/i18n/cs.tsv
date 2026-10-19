@@ -3818,7 +3818,7 @@ navigator	Zoom	Zvětšení
 	{name} (Photoshop)	{name} (Photoshop)
 	{message} ({note})	{message} ({note})
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	Načtena {n} akce ze souboru {file}|Načteny {n} akce ze souboru {file}|Načteno {n} akcí ze souboru {file}
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} krok zatím nemá v PhotoCraftu obdobu|{n} kroky zatím nemají v PhotoCraftu obdobu|{n} kroků zatím nemá v PhotoCraftu obdobu
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} krok zatím nemá v aplikaci Lumbra obdobu|{n} kroky zatím nemají v aplikaci Lumbra obdobu|{n} kroků zatím nemá v aplikaci Lumbra obdobu
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	Uložena {n} akce do souboru {file}|Uloženy {n} akce do souboru {file}|Uloženo {n} akcí do souboru {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Vynechán {n} krok bez obdoby v Photoshopu|Vynechány {n} kroky bez obdoby v Photoshopu|Vynecháno {n} kroků bez obdoby v Photoshopu
 
@@ -3899,7 +3899,7 @@ navigator	Zoom	Zvětšení
 	Nothing to paste: PhotoCraft can't read the system clipboard here	Není co vložit: PhotoCraft zde nemůže číst systémovou schránku
 	Delete this set	Smazat tuto sadu
 	New Set…	Nová sada…
-	PhotoCraft Defaults	Výchozí PhotoCraft
+	Lumbra Defaults	Výchozí Lumbra
 	Save a list of these shortcuts as a web page	Uložit seznam těchto zkratek jako webovou stránku
 	Save the changes to this set	Uložit změny do této sady
 	Save these shortcuts as a .kys file	Uložit tyto zkratky jako soubor .kys

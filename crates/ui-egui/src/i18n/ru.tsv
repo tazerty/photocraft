@@ -3158,7 +3158,7 @@ curves	Smooth	Сгладить
 	{name} (Photoshop)	{name} (Photoshop)
 	{message} ({note})	{message} ({note})
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	Загружена {n} операция из {file}|Загружены {n} операции из {file}|Загружено {n} операций из {file}
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} шаг пока не имеет эквивалента в PhotoCraft|{n} шага пока не имеют эквивалента в PhotoCraft|{n} шагов пока не имеют эквивалента в PhotoCraft
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} шаг пока не имеет эквивалента в Lumbra|{n} шага пока не имеют эквивалента в Lumbra|{n} шагов пока не имеют эквивалента в Lumbra
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	Сохранена {n} операция в {file}|Сохранены {n} операции в {file}|Сохранено {n} операций в {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Пропущен {n} шаг без эквивалента в Photoshop|Пропущены {n} шага без эквивалента в Photoshop|Пропущено {n} шагов без эквивалента в Photoshop
 
@@ -3260,7 +3260,7 @@ curves	Smooth	Сгладить
 	Nothing to paste: PhotoCraft can't read the system clipboard here	Нечего вставить: здесь PhotoCraft не может прочитать системный буфер обмена
 	Delete this set	Удалить этот набор
 	New Set…	Новый набор…
-	PhotoCraft Defaults	Стандартные PhotoCraft
+	Lumbra Defaults	Стандартные Lumbra
 	Save a list of these shortcuts as a web page	Сохранить список этих комбинаций как веб-страницу
 	Save the changes to this set	Сохранить изменения в этом наборе
 	Save these shortcuts as a .kys file	Сохранить эти комбинации как файл .kys

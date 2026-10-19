@@ -3661,7 +3661,7 @@ curves	Smooth	Làm mượt
 	{name} (Photoshop)	{name} (Photoshop)
 	{message} ({note})	{message} ({note})
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	Đã nạp {n} hành động từ {file}
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} bước chưa có chức năng tương ứng trong PhotoCraft
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} bước chưa có chức năng tương ứng trong Lumbra
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	Đã lưu {n} hành động vào {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Đã bỏ qua {n} bước không có chức năng tương ứng trong Photoshop
 
@@ -3750,7 +3750,7 @@ curves	Smooth	Làm mượt
 	Nothing to paste: PhotoCraft can't read the system clipboard here	Không có gì để dán: PhotoCraft không thể đọc bộ nhớ tạm của hệ thống ở đây
 	Delete this set	Xóa bộ này
 	New Set…	Bộ mới…
-	PhotoCraft Defaults	Mặc định của PhotoCraft
+	Lumbra Defaults	Mặc định của Lumbra
 	Save a list of these shortcuts as a web page	Lưu danh sách các phím tắt này thành trang web
 	Save the changes to this set	Lưu thay đổi vào bộ này
 	Save these shortcuts as a .kys file	Lưu các phím tắt này thành tệp .kys

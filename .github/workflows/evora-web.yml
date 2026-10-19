@@ -43,10 +43,11 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
   # Tag amont épinglé (D-19) et son commit.
-  UPSTREAM_TAG: v0.8.2
-  UPSTREAM_COMMIT: d43db3e153c76aefce9b32cef9099e458eaf17a8
-  # Pas de rust-toolchain(.toml) au tag : stable exacte, >= rust-version 1.95 du workspace.
-  RUST_TOOLCHAIN: 1.99.0
+  UPSTREAM_TAG: v0.10.0
+  UPSTREAM_COMMIT: 8407d9ccb125af52944fca9d228383459f94aaef
+  # Pas de rust-toolchain(.toml) au tag : stable exacte, >= rust-version 1.95 du workspace ; celle
+  # de la release web de l'amont v0.10.0 (run 39086600520).
+  RUST_TOOLCHAIN: 1.99.1
   # Trunk 0.21.14 (même version que la CI amont), binaire officiel trunk-rs.
   TRUNK_VERSION: 0.21.14
   TRUNK_SHA256: f2b4680cd239693a646a2795e4633c625328d7b2a044fbe749fa3a2fe9e7036b
@@ -288,6 +289,7 @@ jobs:
           # _headers ni .htaccess ni HOSTING.md : l'hébergement est l'affaire d'Evora (LUM-08).
           cp LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md \
             assets/fonts/OFL-*.txt assets/icons/LICENSE-*.txt assets/dict/LICENSE-*.txt \
+            crates/algo/data/LICENSE-*.txt \
             crates/ui-egui/src/i18n/LICENSE-translations.txt \
             "$work/$name/LICENSES/"
           # Patch E1 : la seule mention ArtCraft conservée, en texte simple, vit dans les mentions.

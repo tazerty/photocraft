@@ -2850,7 +2850,7 @@ curves	Smooth	平滑
 	{name} (Photoshop)	{name}（Photoshop）
 	{message} ({note})	{message}（{note}）
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	已从 {file} 载入 {n} 个动作
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} 个步骤在 PhotoCraft 中尚无对应功能
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} 个步骤在 Lumbra 中尚无对应功能
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	已将 {n} 个动作存储到 {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	已省略 {n} 个没有 Photoshop 对应功能的步骤
 
@@ -2923,7 +2923,7 @@ curves	Smooth	平滑
 	Nothing to paste: PhotoCraft can't read the system clipboard here	没有可粘贴的内容：PhotoCraft 在此无法读取系统剪贴板
 	Delete this set	删除此组
 	New Set…	新建组…
-	PhotoCraft Defaults	PhotoCraft 默认值
+	Lumbra Defaults	Lumbra 默认值
 	Save a list of these shortcuts as a web page	将这些快捷键的列表存储为网页
 	Save the changes to this set	将更改存储到此组
 	Save these shortcuts as a .kys file	将这些快捷键存储为 .kys 文件

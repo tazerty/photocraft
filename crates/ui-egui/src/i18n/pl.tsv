@@ -3816,7 +3816,7 @@ curves	Smooth	Wygładź
 	{name} (Photoshop)	{name} (Photoshop)
 	{message} ({note})	{message} ({note})
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	Wczytano {n} operację z {file}|Wczytano {n} operacje z {file}|Wczytano {n} operacji z {file}
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} krok nie ma jeszcze odpowiednika w PhotoCraft|{n} kroki nie mają jeszcze odpowiednika w PhotoCraft|{n} kroków nie ma jeszcze odpowiednika w PhotoCraft
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} krok nie ma jeszcze odpowiednika w Lumbra|{n} kroki nie mają jeszcze odpowiednika w Lumbra|{n} kroków nie ma jeszcze odpowiednika w Lumbra
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	Zapisano {n} operację do {file}|Zapisano {n} operacje do {file}|Zapisano {n} operacji do {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Pominięto {n} krok bez odpowiednika w Photoshopie|Pominięto {n} kroki bez odpowiednika w Photoshopie|Pominięto {n} kroków bez odpowiednika w Photoshopie
 
@@ -3884,7 +3884,7 @@ curves	Smooth	Wygładź
 	Nothing to paste: PhotoCraft can't read the system clipboard here	Nie ma czego wkleić: PhotoCraft nie może tutaj odczytać schowka systemowego
 	Delete this set	Usuń ten zestaw
 	New Set…	Nowy zestaw…
-	PhotoCraft Defaults	Domyślne PhotoCraft
+	Lumbra Defaults	Domyślne Lumbra
 	Save a list of these shortcuts as a web page	Zapisz listę tych skrótów jako stronę internetową
 	Save the changes to this set	Zapisz zmiany w tym zestawie
 	Save these shortcuts as a .kys file	Zapisz te skróty jako plik .kys

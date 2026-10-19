@@ -4165,7 +4165,7 @@ navigator	Zoom	Zoom
 	{name} (Photoshop)	{name} (Photoshop)
 	{message} ({note})	{message} ({note})
 @plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	Caricata {n} azione da {file}|Caricate {n} azioni da {file}
-@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} passaggio non ha ancora un equivalente in PhotoCraft|{n} passaggi non hanno ancora un equivalente in PhotoCraft
+@plural	{n} step has no Lumbra equivalent yet|{n} steps have no Lumbra equivalent yet	{n} passaggio non ha ancora un equivalente in Lumbra|{n} passaggi non hanno ancora un equivalente in Lumbra
 @plural	Saved {n} action to {file}|Saved {n} actions to {file}	Salvata {n} azione in {file}|Salvate {n} azioni in {file}
 @plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Omesso {n} passaggio senza equivalente in Photoshop|Omessi {n} passaggi senza equivalente in Photoshop
 
@@ -4395,7 +4395,7 @@ shape	Appearance	Aspetto
 	Nothing to paste: PhotoCraft can't read the system clipboard here	Niente da incollare: qui PhotoCraft non può leggere gli appunti di sistema
 	Delete this set	Elimina questo set
 	New Set…	Nuovo set…
-	PhotoCraft Defaults	Predefiniti di PhotoCraft
+	Lumbra Defaults	Predefiniti di Lumbra
 	Save a list of these shortcuts as a web page	Salva un elenco di queste scorciatoie come pagina web
 	Save the changes to this set	Salva le modifiche in questo set
 	Save these shortcuts as a .kys file	Salva queste scorciatoie come file .kys

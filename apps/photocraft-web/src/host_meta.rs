@@ -38,10 +38,34 @@
 //! version) is written as it is: under `none` both lose their location like the document's packet
 //! (an unreadable `shmd` block is left out whole), under `rights` both lose their packet. The
 //! PSD's EXIF data 3 resource (1059), which the engine does not read, is left out.
+//!
+//! Patch LUM-14 r3 (the security review of LF-3): what an export to a format that writes layers
+//! (PSD, PSB, layered TIFF) carries besides the metadata is cleaned too, under `none` as under
+//! `rights`:
+//! - the PSD global blocks: only those the exporter reads or writes again are kept (patterns, the
+//!   type layers' text engine data, the smart filters' caches and mask colour), and the notes under
+//!   `none`; every other block is left out, among them the files placed by smart objects (`lnk2`,
+//!   `lnk3`, `lnkD`, `lnkE`), and under `rights` the notes too;
+//! - the file a smart object places (embedded in it, or kept in those blocks for an imported PSD)
+//!   is embedded again, cleaned: a PNG or a JPEG without its metadata (only the chunks or segments
+//!   that code the image, its colour profile and geometry, copied as they are: the pixels are not
+//!   encoded again), a document (`.pcraft`, PSD, PSB) opened, cleaned under the same policy and
+//!   written as a `.pcraft` document (the exporter makes a PSB of it); any other file, a link to a
+//!   file outside the document, or a file that cannot be read with certainty makes the layer its
+//!   pixels, as Layer › Rasterize › Smart Object does; the placed-layer blocks are written again
+//!   from the document;
+//! - a layer's `shmd` block is rebuilt from what is known to be safe instead of cleaned in place:
+//!   one `cust` item with the layer's `layerTime` and, under `none`, its one XMP packet without its
+//!   location. A block that holds more than one packet, or a packet that is not text, is left out
+//!   whole, and so is every other item (the layer comp states, which the exporter writes again from
+//!   the document's comps, the timeline, anything else).
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
-use photocraft_doc::{Document, Layer, Metadata};
+use photocraft_doc::{Document, Layer, LayerContent, Metadata, PsdGlobalBlock, SmartSource, Surface};
+use photocraft_psd::descriptor::{Descriptor, Id, UnicodeString, Value, VersionedDescriptor};
+use photocraft_psd::metadata::MetadataItem;
 
 /// What an export keeps of the metadata that locates the picture (patch LUM-14 r2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -95,6 +119,37 @@ const DESCRIPTIVE_RESOURCES: [u16; 4] = [1008, IPTC_RESOURCE, EXIF_DATA_3, 1061]
 const RIGHTS_KEYS: [&str; 2] = ["copyright", "rights"];
 /// A layer's metadata block in a PSD (`shmd`), where its own XMP packet lives.
 const SHMD: [u8; 4] = *b"shmd";
+/// The `shmd` item that holds a layer's own metadata, and the two values of it an export keeps
+/// (patch LUM-14 r3): the layer's modify time (a number) and its XMP packet.
+const CUST: [u8; 4] = *b"cust";
+const LAYER_TIME: &str = "layerTime";
+const LAYER_XMP: &str = "layerXMP";
+/// The export formats that write layers (PSD, PSB, layered TIFF): the files placed by smart
+/// objects and the PSD global blocks leave with them (patch LUM-14 r3).
+const LAYERED_EXPORTS: [&str; 4] = ["psd", "psb", "tif", "tiff"];
+/// The PSD blocks that hold the files placed by smart objects, embedded or linked.
+const LINK_KEYS: [[u8; 4]; 4] = [*b"lnk2", *b"lnk3", *b"lnkD", *b"lnkE"];
+/// A smart object's placed-layer blocks, which the exporter writes again from the document.
+const PLACED_KEYS: [[u8; 4]; 3] = [*b"SoLd", *b"PlLd", *b"SoLE"];
+/// The PSD global blocks an export keeps under `none` and `rights`, each read or written again by
+/// the exporter: patterns (`Patt`, `Pat2`, `Pat3`), the type layers' text engine data (`Txt2`),
+/// the smart filters' caches and mask colour (`FEid`, `FXid`, `FMsk`). Any other is left out.
+const GLOBAL_KEPT: [[u8; 4]; 7] = [*b"Patt", *b"Pat2", *b"Pat3", *b"Txt2", *b"FEid", *b"FXid", *b"FMsk"];
+/// The notes' global block: kept under `none`, left out with the notes under `rights`.
+const ANNO: [u8; 4] = *b"Anno";
+/// How deep documents placed by smart objects are cleaned: the exporter's own bound on nested smart
+/// objects (`MAX_NESTING` of `photocraft_io::psd_export`). Deeper, the smart object is its pixels.
+const MAX_NESTED_FILES: u32 = 8;
+/// A PNG's signature, and the chunks a placed PNG keeps: its image, its colour and its geometry.
+const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+const PNG_KEPT: [[u8; 4]; 15] = [
+    *b"IHDR", *b"PLTE", *b"IDAT", *b"IEND", *b"tRNS", *b"cHRM", *b"gAMA", *b"iCCP", *b"sBIT", *b"sRGB", *b"cICP", *b"mDCV", *b"cLLI", *b"bKGD",
+    *b"pHYs",
+];
+/// A JPEG's start of image.
+const JPEG_SOI: [u8; 2] = [0xFF, 0xD8];
+/// A ZIP archive's first bytes: a `.pcraft` document, or another document the engine opens.
+const ZIP_SIGNATURE: [u8; 4] = *b"PK\x03\x04";
 /// IPTC record 2 datasets that name a place: content location code and name, city, sub-location,
 /// province or state, country code and name.
 const IPTC_PLACES: [u8; 7] = [26, 27, 90, 92, 95, 100, 101];
@@ -141,25 +196,74 @@ enum Edit<T> {
 /// alone), when it has metadata to change and `path` is an export (not a `.pcraft` working
 /// document). `None`: encode `doc` itself.
 pub fn for_export(doc: &Document, path: &str, policy: Policy) -> Option<Document> {
-    if policy == Policy::All || photocraft_engine::file_cmds::extension(path).as_deref() == Some("pcraft") {
+    let ext = photocraft_engine::file_cmds::extension(path);
+    if policy == Policy::All || ext.as_deref() == Some("pcraft") {
         return None;
     }
+    let layered = ext.as_deref().is_some_and(|e| LAYERED_EXPORTS.contains(&e));
+    export_copy(doc, policy, layered, 0)
+}
+
+/// The copy of `doc` an export encodes under `policy` (`none` or `rights`), `None` when nothing
+/// changes; `layered`: the format writes layers (patch LUM-14 r3); `depth`: how deep in smart
+/// objects `doc` lies (0: the exported document).
+fn export_copy(doc: &Document, policy: Policy, layered: bool, depth: u32) -> Option<Document> {
     let metadata = match policy {
         Policy::Rights => Some(rights_only(doc)),
         _ => without_location(&doc.metadata),
     };
-    let layers = layers_for_export(&doc.layers, policy);
-    if metadata.is_none() && layers.is_none() {
+    let globals = if layered { globals_for_export(&doc.metadata.psd_global_blocks, policy) } else { None };
+    let scope = Scope { doc, policy, layered, depth, files: RefCell::new(Vec::new()) };
+    let layers = layers_for_export(&doc.layers, &scope);
+    // Under `rights`, the notes are left out too (a format that writes layers keeps them in `Anno`).
+    let notes = layered && policy == Policy::Rights && !doc.notes.is_empty();
+    if metadata.is_none() && globals.is_none() && layers.is_none() && !notes {
         return None;
     }
     let mut out = doc.clone();
     if let Some(metadata) = metadata {
         out.metadata = metadata;
     }
+    if let Some(globals) = globals {
+        out.metadata.psd_global_blocks = globals;
+    }
     if let Some(layers) = layers {
         out.layers = layers;
     }
+    if notes {
+        out.notes = Vec::new();
+    }
     Some(out)
+}
+
+/// What the layers of one document need for an export: the document itself (its global blocks
+/// hold the files of an imported PSD's smart objects), the policy, whether the format writes
+/// layers, how deep in smart objects the document lies, and the placed files already cleaned (the
+/// duplicates of a smart object share its file).
+struct Scope<'a> {
+    doc: &'a Document,
+    policy: Policy,
+    layered: bool,
+    depth: u32,
+    files: RefCell<Vec<(FileKey, Option<SmartSource>)>>,
+}
+
+/// A placed file, by identity: the bytes a smart object embeds (its duplicates share them), or
+/// the id of a file in the document's global blocks.
+#[derive(PartialEq)]
+enum FileKey {
+    Embedded(usize),
+    Linked(String),
+}
+
+/// The PSD global blocks of an export under `policy` (`none` or `rights`): those of
+/// [`GLOBAL_KEPT`], and the notes (`Anno`) under `none`; `None` when every block is kept.
+fn globals_for_export(blocks: &[PsdGlobalBlock], policy: Policy) -> Option<Vec<PsdGlobalBlock>> {
+    let kept = |key: &[u8; 4]| GLOBAL_KEPT.contains(key) || (policy == Policy::None && *key == ANNO);
+    if blocks.iter().all(|(_, key, _)| kept(key)) {
+        return None;
+    }
+    Some(blocks.iter().filter(|(_, key, _)| kept(key)).cloned().collect())
 }
 
 /// The rights alone (policy `rights`, see the module docs). What is kept is cleaned of any
@@ -185,24 +289,31 @@ fn rights_only(doc: &Document) -> Metadata {
     Metadata { xmp, exif: None, text, psd_resources, ..m.clone() }
 }
 
-/// Does `layer`, or a layer of its group, hold an XMP packet or a `shmd` block?
-fn layer_has_metadata(layer: &Layer) -> bool {
-    layer.xmp.is_some() || layer.psd_blocks.iter().any(|(key, _)| *key == SHMD) || layer.children().is_some_and(|ch| ch.iter().any(layer_has_metadata))
+/// Does `layer`, or a layer of its group, hold an XMP packet, a `shmd` block or a placed file's
+/// block, or, for a format that writes layers, is it a smart object?
+fn needs_export_copy(layer: &Layer, layered: bool) -> bool {
+    layer.xmp.is_some()
+        || layer.psd_blocks.iter().any(|(key, _)| *key == SHMD || LINK_KEYS.contains(key))
+        || (layered && matches!(layer.content, LayerContent::Smart(_)))
+        || layer.children().is_some_and(|ch| ch.iter().any(|c| needs_export_copy(c, layered)))
 }
 
-/// The layers for an export under `policy` (`none` or `rights`); `None`: no layer holds metadata.
-fn layers_for_export(layers: &[Layer], policy: Policy) -> Option<Vec<Layer>> {
-    if !layers.iter().any(layer_has_metadata) {
+/// The layers for an export under the scope's policy (`none` or `rights`); `None`: no layer needs
+/// a change.
+fn layers_for_export(layers: &[Layer], scope: &Scope<'_>) -> Option<Vec<Layer>> {
+    if !layers.iter().any(|l| needs_export_copy(l, scope.layered)) {
         return None;
     }
-    Some(layers.iter().map(|l| layer_for_export(l, policy)).collect())
+    Some(layers.iter().map(|l| layer_for_export(l, scope)).collect())
 }
 
 /// One layer (and its group's layers) for an export: its XMP packet without its location, or none
-/// for the rights alone; its `shmd` block likewise (`shmd_for_export`).
-fn layer_for_export(layer: &Layer, policy: Policy) -> Layer {
+/// for the rights alone; its `shmd` block rebuilt (`shmd_for_export`); no placed file's block
+/// (patch LUM-14 r3); for a format that writes layers, a smart object's file cleaned
+/// (`smart_for_export`).
+fn layer_for_export(layer: &Layer, scope: &Scope<'_>) -> Layer {
     let mut out = layer.clone();
-    out.xmp = match (&layer.xmp, policy) {
+    out.xmp = match (&layer.xmp, scope.policy) {
         (Some(_), Policy::Rights) | (None, _) => None,
         (Some(x), _) => match xmp_without_location(x) {
             Edit::Kept => Some(x.clone()),
@@ -213,33 +324,221 @@ fn layer_for_export(layer: &Layer, policy: Policy) -> Layer {
     out.psd_blocks = layer
         .psd_blocks
         .iter()
-        .filter_map(|(key, data)| if *key == SHMD { shmd_for_export(data, policy).map(|d| (*key, d)) } else { Some((*key, data.clone())) })
+        .filter(|(key, _)| !LINK_KEYS.contains(key))
+        .filter_map(|(key, data)| if *key == SHMD { shmd_for_export(data, scope.policy).map(|d| (*key, d)) } else { Some((*key, data.clone())) })
         .collect();
+    if scope.layered {
+        smart_for_export(&mut out, scope);
+    }
     if let (Some(children), Some(source)) = (out.children_mut(), layer.children()) {
-        *children = source.iter().map(|c| layer_for_export(c, policy)).collect();
+        *children = source.iter().map(|c| layer_for_export(c, scope)).collect();
     }
     out
 }
 
-/// A layer's `shmd` block for an export: unreadable, left out whole; a packet still inside it
-/// cleaned of its location (taken out for the rights alone), the rest of the block kept; a block
-/// without a packet kept as it is.
-fn shmd_for_export(data: &Arc<Vec<u8>>, policy: Policy) -> Option<Arc<Vec<u8>>> {
-    if photocraft_psd::metadata::parse_shmd(data).is_err() {
-        return None;
+/// A layer's `shmd` block for an export (patch LUM-14 r3), rebuilt from what is known to be safe
+/// rather than cleaned in place: one `cust` item with the layer's `layerTime` (a number) and,
+/// under `none`, its one XMP packet without its location. Every other item and value is left out
+/// (the layer comp states, `cmls`, which the exporter writes again from the document's comps, the
+/// timeline, anything the engine does not read). `None`, the block left out whole: it cannot be
+/// read, it holds more than one packet (in one `cust` item or in several) or a packet that is not
+/// text, or nothing is left.
+fn shmd_for_export(data: &[u8], policy: Policy) -> Option<Arc<Vec<u8>>> {
+    let items = photocraft_psd::metadata::parse_shmd(data).ok()?;
+    let mut time = None;
+    let mut packets = Vec::new();
+    for item in items.iter().filter(|item| item.key == CUST) {
+        let (cust, _) = VersionedDescriptor::parse_prefix(&item.data).ok()?;
+        for (key, value) in cust.descriptor.items {
+            if key.is(LAYER_XMP) {
+                packets.push(value);
+            } else if key.is(LAYER_TIME) && time.is_none() {
+                if let Value::Double(t) = value {
+                    time = Some(t);
+                }
+            }
+        }
     }
-    let Some((xmp, rest)) = photocraft_psd::metadata::take_layer_xmp(data) else { return Some(data.clone()) };
-    let cleaned = match policy {
-        Policy::Rights => None,
-        _ => match xmp_without_location(&xmp) {
+    let packet = match packets.as_slice() {
+        [] => None,
+        [Value::Text(text)] => Some(text.to_string_lossy()),
+        _ => return None,
+    };
+    let packet = match packet {
+        Some(xmp) if policy == Policy::None => match xmp_without_location(&xmp) {
             Edit::Kept => Some(xmp),
             Edit::Changed(c) => Some(c),
             Edit::Dropped => None,
         },
+        _ => None,
     };
-    match cleaned {
-        Some(packet) => photocraft_psd::metadata::put_layer_xmp(rest.as_deref(), &packet).ok().map(Arc::new),
-        None => rest.map(Arc::new),
+    let mut cust = Descriptor { name: UnicodeString::new_nul(""), class_id: Id::new("metadata"), items: Vec::new() };
+    if let Some(t) = time {
+        cust.items.push((Id::new(LAYER_TIME), Value::Double(t)));
+    }
+    if let Some(xmp) = packet {
+        cust.items.push((Id::new(LAYER_XMP), Value::Text(UnicodeString::new_nul(&xmp))));
+    }
+    if cust.items.is_empty() {
+        return None;
+    }
+    let item = MetadataItem::new(CUST, VersionedDescriptor::new(cust).to_bytes());
+    Some(Arc::new(photocraft_psd::metadata::write_shmd(&[item])))
+}
+
+/// A smart object, for a format that writes layers (patch LUM-14 r3): the file it places cleaned
+/// and embedded in it (`placed_file`), its placed-layer blocks written again by the exporter from
+/// the document; a file that cannot be cleaned with certainty, or a link to a file outside the
+/// document, makes the layer its pixels, as Layer › Rasterize › Smart Object does (its rendered
+/// appearance, in the document's pixel format).
+fn smart_for_export(layer: &mut Layer, scope: &Scope<'_>) {
+    let LayerContent::Smart(sm) = &mut layer.content else { return };
+    match placed_file(&sm.source, scope) {
+        Some(source) => {
+            sm.source = source;
+            sm.psd_raw = None;
+        }
+        None => {
+            let fmt = scope.doc.pixel_format();
+            let pixels = match sm.cache.take() {
+                Some(c) if c.format() == fmt => c,
+                Some(c) => c.convert(fmt),
+                None => Surface::new(fmt),
+            };
+            layer.content = LayerContent::Raster(pixels);
+        }
+    }
+    layer.psd_blocks.retain(|(key, _)| !PLACED_KEYS.contains(key));
+}
+
+/// The source of a smart object for an export: its file (embedded in it, or kept in the document's
+/// global blocks for an imported PSD) cleaned by `file_for_export` and embedded; `None` when that
+/// file cannot be cleaned with certainty, or lies outside the document.
+fn placed_file(source: &SmartSource, scope: &Scope<'_>) -> Option<SmartSource> {
+    let key = match source {
+        SmartSource::Embedded { bytes, .. } => FileKey::Embedded(Arc::as_ptr(bytes) as usize),
+        SmartSource::Linked { path } => FileKey::Linked(path.clone()),
+    };
+    if let Some((_, done)) = scope.files.borrow().iter().find(|(k, _)| *k == key) {
+        return done.clone();
+    }
+    let linked;
+    let (file_name, bytes) = match source {
+        SmartSource::Embedded { file_name, bytes } => (file_name.as_str(), bytes.as_slice()),
+        SmartSource::Linked { path } => {
+            linked = photocraft_io::linked::find_linked_file(&scope.doc.metadata, path)?;
+            (linked.file_name.as_str(), linked.bytes.as_slice())
+        }
+    };
+    let done = file_for_export(file_name, bytes, scope).map(|cleaned| SmartSource::Embedded { file_name: file_name.to_owned(), bytes: Arc::new(cleaned) });
+    scope.files.borrow_mut().push((key, done.clone()));
+    done
+}
+
+/// A placed file cleaned for an export: a PNG or a JPEG without its metadata, its pixels as they
+/// are (`png_without_metadata`, `jpeg_without_metadata`); a document the engine opens (a
+/// `.pcraft` or another archive, a PSD or a PSB) opened, cleaned under the same policy and written
+/// again as a `.pcraft` document, which the exporter makes a PSB of. `None` for any other file, a
+/// file that cannot be read with certainty, or a document nested deeper than [`MAX_NESTED_FILES`].
+fn file_for_export(name: &str, bytes: &[u8], scope: &Scope<'_>) -> Option<Vec<u8>> {
+    if bytes.starts_with(&PNG_SIGNATURE) {
+        return png_without_metadata(bytes);
+    }
+    if bytes.starts_with(&JPEG_SOI) {
+        return jpeg_without_metadata(bytes);
+    }
+    if !(photocraft_io::is_psd(bytes) || bytes.starts_with(&ZIP_SIGNATURE)) || scope.depth >= MAX_NESTED_FILES {
+        return None;
+    }
+    let nested = photocraft_io::import(name, bytes).ok()?.document;
+    let cleaned = export_copy(&nested, scope.policy, true, scope.depth + 1);
+    let doc = cleaned.as_ref().unwrap_or(&nested);
+    photocraft_io::export(doc, "pcraft", &photocraft_io::ExportOptions::default()).ok().map(|r| r.bytes)
+}
+
+/// A PNG with the chunks of [`PNG_KEPT`] alone, each copied as it is; whatever follows `IEND` is
+/// left out. `None` when the chunks cannot be walked up to `IEND`.
+fn png_without_metadata(b: &[u8]) -> Option<Vec<u8>> {
+    let mut out = PNG_SIGNATURE.to_vec();
+    let mut at = PNG_SIGNATURE.len();
+    loop {
+        let length: [u8; 4] = b.get(at..at.checked_add(4)?)?.try_into().ok()?;
+        let end = at.checked_add(12)?.checked_add(usize::try_from(u32::from_be_bytes(length)).ok()?)?;
+        let chunk = b.get(at..end)?;
+        let kind: [u8; 4] = chunk.get(4..8)?.try_into().ok()?;
+        if PNG_KEPT.contains(&kind) {
+            out.extend_from_slice(chunk);
+        }
+        if kind == *b"IEND" {
+            return Some(out);
+        }
+        at = end;
+    }
+}
+
+/// A JPEG with the segments of [`jpeg_segment_kept`] alone, each copied as it is, and its scans'
+/// coded data; whatever follows the end of image is left out (the further pictures of a
+/// multi-picture file among them). `None` when the segments cannot be walked up to the end of
+/// image.
+fn jpeg_without_metadata(b: &[u8]) -> Option<Vec<u8>> {
+    let mut out = JPEG_SOI.to_vec();
+    let mut at = JPEG_SOI.len();
+    loop {
+        if *b.get(at)? != 0xFF {
+            return None;
+        }
+        // Fill bytes before a marker.
+        while b.get(at + 1) == Some(&0xFF) {
+            at += 1;
+        }
+        let marker = *b.get(at + 1)?;
+        at += 2;
+        match marker {
+            0xD9 => {
+                out.extend_from_slice(&[0xFF, 0xD9]);
+                return Some(out);
+            }
+            // No marker there, or a second start of image.
+            0x00 | 0xD8 => return None,
+            // Markers without a length.
+            0x01 | 0xD0..=0xD7 => {
+                out.extend_from_slice(&[0xFF, marker]);
+                continue;
+            }
+            _ => {}
+        }
+        let length = usize::from(u16::from_be_bytes([*b.get(at)?, *b.get(at + 1)?]));
+        let segment = b.get(at..at.checked_add(length)?).filter(|_| length >= 2)?;
+        let kept = jpeg_segment_kept(marker, segment);
+        if kept {
+            out.extend_from_slice(&[0xFF, marker]);
+            out.extend_from_slice(segment);
+        }
+        at += length;
+        if marker == 0xDA {
+            // The scan's coded data, up to the next marker that is neither a stuffed byte (`FF 00`)
+            // nor a restart (`FF D0` to `FF D7`).
+            let start = at;
+            while !(*b.get(at)? == 0xFF && b.get(at + 1).is_some_and(|&m| m != 0x00 && !(0xD0..=0xD7).contains(&m))) {
+                at += 1;
+            }
+            out.extend_from_slice(b.get(start..at)?);
+        }
+    }
+}
+
+/// Is a JPEG segment kept for an export: one that codes the image (frames and tables, `C0` to
+/// `CF`; scan, quantization tables, number of lines, restart interval, hierarchical progression and
+/// expansion, `DA` to `DF`), the JFIF header, an ICC profile, Adobe's colour transform. Every other
+/// segment is left out: EXIF and XMP (APP1), IPTC (APP13), comments, any other application data.
+fn jpeg_segment_kept(marker: u8, segment: &[u8]) -> bool {
+    let body = segment.get(2..).unwrap_or_default();
+    match marker {
+        0xC0..=0xCF | 0xDA..=0xDF => true,
+        0xE0 => body.starts_with(b"JFIF\0"),
+        0xE2 => body.starts_with(b"ICC_PROFILE\0"),
+        0xEE => body.starts_with(b"Adobe"),
+        _ => false,
     }
 }
 

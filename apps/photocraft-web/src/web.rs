@@ -537,6 +537,8 @@ impl eframe::App for WebShell {
 }
 
 fn services(inbox: Inbox, place_inbox: Inbox, cursor_pos: photocraft_ui_egui::CursorPosFn, bridge: Option<crate::ehp::Bridge>) -> Services {
+    // Evora build (patch LUM-14): under the bridge, an export leaves without the location.
+    let host = bridge.is_some();
     // Evora build (patch LUM-02): under the bridge, the files the engine reads come from the
     // host's picker (`host_pick`), never from the browser's.
     let picker = bridge.clone();
@@ -552,7 +554,11 @@ fn services(inbox: Inbox, place_inbox: Inbox, cursor_pos: photocraft_ui_egui::Cu
         import: Some(Box::new(|name: &str, bytes: &[u8], opts: &photocraft_io::ImportOptions| {
             photocraft_io::import_with_options(name, bytes, opts).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
         })),
-        export: Some(Box::new(|doc: &Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {
+        export: Some(Box::new(move |doc: &Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {
+            // Evora build (patch LUM-14): every file but the `.pcraft` working document is encoded
+            // from a copy without the location (`host_meta`).
+            let cleaned = if host { crate::host_meta::for_export(doc, path) } else { None };
+            let doc = cleaned.as_ref().unwrap_or(doc);
             photocraft_io::export(doc, path, &settings.io_options()).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
         })),
         file_dialog: Some(Box::new(move |request, _parent, reply| match request {

@@ -44,6 +44,9 @@ mod host_menus;
 // Evora build (patch LUM-13): the exit key, `evora:focus-out`.
 #[cfg(target_arch = "wasm32")]
 mod host_focus;
+// Evora build (patch LUM-14): exports without the location.
+#[cfg(target_arch = "wasm32")]
+mod host_meta;
 
 #[cfg(target_arch = "wasm32")]
 mod web;

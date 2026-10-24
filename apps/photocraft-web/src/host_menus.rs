@@ -63,7 +63,5 @@ pub const HIDDEN: [&str; 38] = [
 
 /// Hide [`HIDDEN`] (under the bridge only).
 pub fn install() {
-    // SABORDAGE QA (EVORA-LUM-70, témoin de LUM-09, retiré par EVORA-LUM-71) : rien n'est masqué.
-    let _ = &HIDDEN;
-    photocraft_ui_egui::menus::set_host_hidden(&[]);
+    photocraft_ui_egui::menus::set_host_hidden(&HIDDEN);
 }

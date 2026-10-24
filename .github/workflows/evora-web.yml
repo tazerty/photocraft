@@ -59,8 +59,7 @@ env:
   BINARYEN_SHA256: e959f2170af4c20c552e9de3a0253704d6a9d2766e8fdb88e4d6ac4bae9388fe
   # Plafond par fichier de packaging/web/package.sh (24 MiB) : repli de la porte de taille (LUM-08)
   # tant que le budget Evora (variable de dépôt EVORA_WASM_BUDGET_BYTES, D-15) n'est pas posé.
-  # SABORDAGE QA (EVORA-LUM-70, témoin de LUM-08, retiré par EVORA-LUM-71) : budget de 1 octet.
-  UPSTREAM_WASM_LIMIT_BYTES: "1"
+  UPSTREAM_WASM_LIMIT_BYTES: "25165824"
   # Portes d'audit (EmbarkStudios, binaires musl officiels).
   CARGO_DENY_VERSION: 0.20.2
   CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f

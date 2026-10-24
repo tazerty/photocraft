@@ -149,9 +149,7 @@ pub fn settle(re: &str, ok: bool, code: Option<&str>) -> bool {
         if cell.as_ref().is_some_and(|k| k.id == re) { cell.take() } else { None }
     });
     let Some(pick) = pick else { return false };
-    // SABORDAGE QA (EVORA-LUM-70, témoin de LUM-02, retiré par EVORA-LUM-71) : les fichiers remis par
-    // la coquille ne sont jamais rendus au dialogue.
-    if !ok || !pick.id.is_empty() {
+    if !ok {
         if code != Some("cancelled") {
             log::warn!("photocraft-web: the host's picker gave nothing ({})", code.unwrap_or_default());
         }

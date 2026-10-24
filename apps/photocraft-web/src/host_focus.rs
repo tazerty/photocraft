@@ -14,8 +14,7 @@ use wasm_bindgen::{JsCast as _, closure::Closure};
 use crate::ehp::Bridge;
 
 /// The key that hands the keyboard back to the host.
-// SABORDAGE QA (EVORA-LUM-70, témoin de LUM-13, retiré par EVORA-LUM-71) : F6 n'est plus retenue.
-const EXIT_KEY: &str = "F16";
+const EXIT_KEY: &str = "F6";
 
 /// Listen for the exit key on the engine's window, in the capture phase.
 pub fn listen(bridge: &Bridge) {

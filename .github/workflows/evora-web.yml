@@ -17,8 +17,10 @@
 # témoins sabordés de ces bancs : chacun n'est VALIDE que si ses rouges sont exactement ceux attendus,
 # chacun à sa place (autotest du verdict sans navigateur, témoins « banc », « moteur », « muet » et
 # « ecoutes »). Puis un build de fumée (feature evora-smoke, jamais empaqueté) prouve que la panique
-# du moteur parvient à la coquille (scénario « pont-panique », LUM-04) ; son marqueur doit être absent
-# du .wasm servi.
+# du moteur parvient à la coquille (scénario « pont-panique », LUM-04), et que la politique de
+# localisation imposée par la coquille s'applique à chaque export, calques compris, en PNG, JPEG,
+# TIFF, WebP et PSD (scénario « pont-politique », LUM-14 r2, une passe par politique : none, rights,
+# all) ; ses marqueurs doivent être absents du .wasm servi.
 # Chaque porte s'exécute même si une autre échoue ; le bilan échoue s'il en manque une, et l'artefact
 # n'est publié qu'après un bilan vert.
 #
@@ -472,7 +474,7 @@ jobs:
             && [ "$docs" -eq 0 ] && [ "$docs_sans_liste" -eq 0 ] && [ "$docs_versionchange" -eq 0 ] && [ "$docs_storage" -eq 0 ] \
             && [ "$temoin_ecoutes" -eq 0 ]
 
-      - name: Fumée de la panique (build evora-smoke, hors artefact)
+      - name: Fumée du build evora-smoke (panique, politique de localisation ; hors artefact)
         id: panic
         continue-on-error: true
         timeout-minutes: 30
@@ -482,9 +484,11 @@ jobs:
         run: |
           # LUM-04 (e) : un second build du moteur, avec la feature evora-smoke (la coquille admise peut
           # le faire paniquer), prouve que la panique parvient à la coquille en un seul evora:failed
-          # {code: "panic"}. Ce build n'est jamais empaqueté : son marqueur doit être présent dans son
-          # .wasm (sinon la recette ne prouve rien) et absent du .wasm servi. Même profil que le build
-          # servi (cache cargo partagé), sans wasm-opt.
+          # {code: "panic"}. LUM-14 r2 : la même coquille y ajoute deux calques à XMP propre et fait
+          # exporter la photo géolocalisée en cinq formats, sous chacune des trois politiques de
+          # localisation. Ce build n'est jamais empaqueté : chacun de ses marqueurs doit être présent
+          # dans son .wasm (sinon la recette ne prouve rien) et absent du .wasm servi. Même profil que
+          # le build servi (cache cargo partagé), sans wasm-opt.
           smoke_dir="$RUNNER_TEMP/evora-web-smoke"
           (
             cd apps/photocraft-web
@@ -497,21 +501,35 @@ jobs:
           )
           [ -f "$smoke_dir/index.html" ] || mv "$smoke_dir/index-smoke.html" "$smoke_dir/index.html"
           python3 -I evora/ci/csp_hashes.py "$smoke_dir/index.html" "$smoke_dir/csp-hashes.txt"
-          count() { # dossier : occurrences du marqueur dans ses .wasm
-            python3 -I -c 'import glob, sys; print(sum(open(f, "rb").read().count(b"evora:smoke-panic") for f in glob.glob(sys.argv[1] + "/*.wasm")))' "$1"
+          count() { # dossier marqueur : occurrences du marqueur dans ses .wasm
+            python3 -I -c 'import glob, sys; print(sum(open(f, "rb").read().count(sys.argv[2].encode()) for f in glob.glob(sys.argv[1] + "/*.wasm")))' "$1" "$2"
           }
-          smoke_hits=$(count "$smoke_dir")
-          served_hits=$(count "$EVORA_PKG_DIR")
-          {
-            echo "### Fumée de la panique (build evora-smoke, LUM-04)"
-            echo
-            echo "Marqueur \`evora:smoke-panic\` : $smoke_hits occurrence(s) dans le build de fumée, $served_hits dans le .wasm servi (attendu : au moins 1, puis 0)."
-            echo
-          } >> "$GITHUB_STEP_SUMMARY"
-          [ "$smoke_hits" -ge 1 ] || { echo "::error::marqueur absent du build de fumée : la recette ne prouve rien"; exit 1; }
-          [ "$served_hits" -eq 0 ] || { echo "::error::le marqueur du build de fumée est dans le .wasm servi"; exit 1; }
+          echo "### Fumée du build evora-smoke (LUM-04, LUM-14 r2)" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          for marker in evora:smoke-panic evora:smoke-export evora:smoke-layer-xmp; do
+            smoke_hits=$(count "$smoke_dir" "$marker")
+            served_hits=$(count "$EVORA_PKG_DIR" "$marker")
+            echo "Marqueur \`$marker\` : $smoke_hits occurrence(s) dans le build de fumée, $served_hits dans le .wasm servi (attendu : au moins 1, puis 0)." >> "$GITHUB_STEP_SUMMARY"
+            [ "$smoke_hits" -ge 1 ] || { echo "::error::marqueur $marker absent du build de fumée : la recette ne prouve rien"; exit 1; }
+            [ "$served_hits" -eq 0 ] || { echo "::error::le marqueur $marker du build de fumée est dans le .wasm servi"; exit 1; }
+          done
+          echo >> "$GITHUB_STEP_SUMMARY"
+          set +e
           SMOKE_SCENARIO=pont-panique SMOKE_QUERY="host=evora&webgl" \
             node evora/ci/smoke.mjs "$smoke_dir" "$smoke_dir/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-panique.json" "$EVORA_FONTS_DIR"
+          panique=$?
+          # LUM-14 r2 : une passe par politique de localisation, chacune dans un navigateur neuf.
+          SMOKE_SCENARIO=pont-politique SMOKE_POLICY=none SMOKE_QUERY="host=evora&webgl" \
+            node evora/ci/smoke.mjs "$smoke_dir" "$smoke_dir/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-politique-none.json" "$EVORA_FONTS_DIR"
+          politique_none=$?
+          SMOKE_SCENARIO=pont-politique SMOKE_POLICY=rights SMOKE_QUERY="host=evora&webgl" \
+            node evora/ci/smoke.mjs "$smoke_dir" "$smoke_dir/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-politique-rights.json" "$EVORA_FONTS_DIR"
+          politique_rights=$?
+          SMOKE_SCENARIO=pont-politique SMOKE_POLICY=all SMOKE_QUERY="host=evora&webgl" \
+            node evora/ci/smoke.mjs "$smoke_dir" "$smoke_dir/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-politique-all.json" "$EVORA_FONTS_DIR"
+          politique_all=$?
+          echo "Fumée du build evora-smoke : panique $panique ; politique none $politique_none, rights $politique_rights, all $politique_all (0 = vert)"
+          [ "$panique" -eq 0 ] && [ "$politique_none" -eq 0 ] && [ "$politique_rights" -eq 0 ] && [ "$politique_all" -eq 0 ]
 
       - name: Bilan des portes
         env:
@@ -530,7 +548,7 @@ jobs:
             echo "| cargo-about | $ABOUT |"
             echo "| Portes Evora | $GATES |"
             echo "| Test de fumée | $SMOKE |"
-            echo "| Fumée de la panique (build evora-smoke) | $PANIC |"
+            echo "| Fumée du build evora-smoke (panique, politique de localisation) | $PANIC |"
           } >> "$GITHUB_STEP_SUMMARY"
           for o in "$DENY" "$ABOUT" "$GATES" "$SMOKE" "$PANIC"; do
             [ "$o" = "success" ] || { echo "::error::une porte bloquante a échoué (deny=$DENY about=$ABOUT gates=$GATES smoke=$SMOKE panic=$PANIC)"; exit 1; }

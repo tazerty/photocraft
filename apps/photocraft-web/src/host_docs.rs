@@ -222,8 +222,65 @@ impl HostDocs {
                 HostEvent::Command { id, command } => self.command(app, ctx, &id, &command),
                 HostEvent::Saved { re, ok, doc_ref } => self.saved(app, &re, ok, doc_ref),
                 HostEvent::Font { id, family, bytes } => self.font(app, &id, &family, bytes),
+                #[cfg(feature = "evora-smoke")]
+                HostEvent::SmokeExport { id, ext } => self.smoke_export(app, &id, &ext),
+                #[cfg(feature = "evora-smoke")]
+                HostEvent::SmokeLayerXmp { id, xmp } => self.smoke_layer_xmp(app, &id, &xmp),
             }
         }
+    }
+
+    /// Smoke build only (scenario pont-politique, patch LUM-14 r2): the active document encoded as
+    /// `ext` by the export service (the host's location policy applied), every metadata kept by the
+    /// settings (the defaults, Metadata « All »), then written like any export (`evora:export`).
+    #[cfg(feature = "evora-smoke")]
+    fn smoke_export(&mut self, app: &mut PhotocraftApp, id: &str, ext: &str) {
+        let Some(doc) = app.session.active().map(|st| st.doc.clone()) else {
+            self.bridge.ack(id, false, Some("not_found"));
+            return;
+        };
+        let path = format!("evora-politique.{ext}");
+        let settings = photocraft_ui_egui::ExportSettings::default();
+        let encoded = match app.services.export.as_ref() {
+            Some(export) => export(&doc, &path, &settings),
+            None => Err("no exporter configured".to_owned()),
+        };
+        match encoded.and_then(|(bytes, _)| write(&self.bridge, &path, &bytes)) {
+            Ok(()) => self.bridge.ack(id, true, None),
+            Err(e) => {
+                log::warn!("photocraft-web: smoke export {ext} failed: {e}");
+                self.bridge.ack(id, false, Some("busy"));
+            }
+        }
+    }
+
+    /// Smoke build only (scenario pont-politique, patch LUM-14 r2): two copies of the active
+    /// document's bottom layer above it, one with `xmp` as its own packet (`Layer::xmp`), the other
+    /// with `xmp` in a raw `shmd` block, as a document from an earlier version keeps it.
+    #[cfg(feature = "evora-smoke")]
+    fn smoke_layer_xmp(&mut self, app: &mut PhotocraftApp, id: &str, xmp: &str) {
+        let Ok(block) = photocraft_psd::metadata::put_layer_xmp(None, xmp) else {
+            self.bridge.ack(id, false, Some("invalid_content"));
+            return;
+        };
+        let Some(st) = app.session.active_mut() else {
+            self.bridge.ack(id, false, Some("not_found"));
+            return;
+        };
+        let doc = Arc::make_mut(&mut st.doc);
+        let Some(bottom) = doc.layers.first() else {
+            self.bridge.ack(id, false, Some("not_found"));
+            return;
+        };
+        let mut own = bottom.duplicate();
+        own.xmp = Some(Arc::from(xmp));
+        let mut raw = bottom.duplicate();
+        raw.xmp = None;
+        raw.psd_blocks.retain(|(key, _)| key != b"shmd");
+        raw.psd_blocks.push((*b"shmd", Arc::new(block)));
+        doc.layers.push(own);
+        doc.layers.push(raw);
+        self.bridge.ack(id, true, None);
     }
 
     /// `evora:font` (patch LUM-11): the file registers its families, listed in the font menus, or

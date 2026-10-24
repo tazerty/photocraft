@@ -53,6 +53,17 @@ use serde_json::json;
 
 use crate::ehp::{Bridge, HostEvent};
 
+/// Smoke build only (scenario pont-politique, patch LUM-14 r3): the content of the global block the
+/// engine does not read, the author (and text) of the note, and the `layerTime` of the `shmd`
+/// blocks that `evora:smoke-placed` and `evora:smoke-shmd` add (values of the bench, read back in
+/// the exported bytes by `evora/ci/smoke_ehp.mjs`).
+#[cfg(feature = "evora-smoke")]
+const SMOKE_GLOBAL: &[u8] = b"EvoraGeoGlobal\0\0";
+#[cfg(feature = "evora-smoke")]
+const SMOKE_NOTE_AUTHOR: &str = "EvoraNoteAuthor";
+#[cfg(feature = "evora-smoke")]
+const SMOKE_LAYER_TIME: f64 = 1_700_000_000.0;
+
 /// A save handed to the host and waiting for `evora:saved` (patch LUM-04).
 struct Pending {
     /// The `evora:save` id the answer carries in `re`.
@@ -226,6 +237,10 @@ impl HostDocs {
                 HostEvent::SmokeExport { id, ext } => self.smoke_export(app, &id, &ext),
                 #[cfg(feature = "evora-smoke")]
                 HostEvent::SmokeLayerXmp { id, xmp } => self.smoke_layer_xmp(app, &id, &xmp),
+                #[cfg(feature = "evora-smoke")]
+                HostEvent::SmokePlaced { id, files } => self.smoke_placed(app, &id, files),
+                #[cfg(feature = "evora-smoke")]
+                HostEvent::SmokeShmd { id, packets } => self.smoke_shmd(app, &id, &packets),
             }
         }
     }
@@ -280,6 +295,119 @@ impl HostDocs {
         raw.psd_blocks.push((*b"shmd", Arc::new(block)));
         doc.layers.push(own);
         doc.layers.push(raw);
+        self.bridge.ack(id, true, None);
+    }
+
+    /// Smoke build only (scenario pont-politique, patch LUM-14 r3): what an export must clean
+    /// besides the metadata, added to the active document. Above its layers, copies of its bottom
+    /// layer made smart objects (the bottom layer's pixels as their rendered appearance) placing:
+    /// the PNG `png`, the JPEG `jpeg`, the file `other` (of no kind the export can clean), a
+    /// `.pcraft` document (the bottom layer, with `nested_xmp` as its XMP and the active document's
+    /// EXIF), and the PNG `linked` as an imported PSD keeps it (a document holding that smart
+    /// object, written as a PSD and opened again: the smart object names the file, kept in a global
+    /// `lnk2` block, which the active document gets too). Then a global block the engine does not
+    /// read (`evGP`, [`SMOKE_GLOBAL`]) and a note by [`SMOKE_NOTE_AUTHOR`].
+    #[cfg(feature = "evora-smoke")]
+    fn smoke_placed(&mut self, app: &mut PhotocraftApp, id: &str, files: crate::ehp::SmokeFiles) {
+        use photocraft_doc::{Affine, LayerContent, Note, SmartObject, SmartSource};
+        let Some(st) = app.session.active_mut() else {
+            self.bridge.ack(id, false, Some("not_found"));
+            return;
+        };
+        let Some(bottom) = st.doc.layers.first().cloned() else {
+            self.bridge.ack(id, false, Some("not_found"));
+            return;
+        };
+        let LayerContent::Raster(pixels) = &bottom.content else {
+            self.bridge.ack(id, false, Some("invalid_content"));
+            return;
+        };
+        let smart = |name: &str, file_name: &str, bytes: Vec<u8>| {
+            let mut layer = bottom.duplicate();
+            layer.name = name.to_owned();
+            layer.xmp = None;
+            layer.psd_blocks.clear();
+            let source = SmartSource::Embedded { file_name: file_name.to_owned(), bytes: Arc::new(bytes) };
+            layer.content = LayerContent::Smart(SmartObject::new(source, Affine::IDENTITY, Some(pixels.clone())));
+            layer
+        };
+        let mut nested = (*st.doc).clone();
+        nested.layers = vec![bottom.duplicate()];
+        nested.metadata.xmp = Some(files.nested_xmp);
+        let nested = photocraft_io::export(&nested, "pcraft", &photocraft_io::ExportOptions::default());
+        let mut psd = (*st.doc).clone();
+        psd.layers = vec![smart("evora-place-linked", "evora-place-linked.png", files.linked)];
+        psd.metadata = photocraft_doc::Metadata::default();
+        let reopened = photocraft_io::export(&psd, "psd", &photocraft_io::ExportOptions::default())
+            .and_then(|r| photocraft_io::import("evora-place-linked.psd", &r.bytes));
+        let (Ok(nested), Ok(reopened)) = (nested, reopened) else {
+            self.bridge.ack(id, false, Some("busy"));
+            return;
+        };
+        let reopened = reopened.document;
+        let Some(linked) = reopened.layers.iter().find(|l| matches!(l.content, LayerContent::Smart(_))) else {
+            self.bridge.ack(id, false, Some("invalid_content"));
+            return;
+        };
+        let mut layers = vec![
+            smart("evora-place-png", "evora-place.png", files.png),
+            smart("evora-place-jpeg", "evora-place.jpg", files.jpeg),
+            smart("evora-place-other", "evora-place.bin", files.other),
+            smart("evora-place-pcraft", "evora-place.pcraft", nested.bytes),
+            linked.duplicate(),
+        ];
+        let doc = Arc::make_mut(&mut st.doc);
+        doc.layers.append(&mut layers);
+        let link_blocks = reopened.metadata.psd_global_blocks.iter().filter(|(_, key, _)| matches!(key, b"lnk2" | b"lnk3" | b"lnkD" | b"lnkE"));
+        doc.metadata.psd_global_blocks.extend(link_blocks.cloned());
+        doc.metadata.psd_global_blocks.push((*b"8BIM", *b"evGP", Arc::new(SMOKE_GLOBAL.to_vec())));
+        doc.notes.push(Note { author: SMOKE_NOTE_AUTHOR.to_owned(), text: SMOKE_NOTE_AUTHOR.to_owned(), ..Note::default() });
+        self.bridge.ack(id, true, None);
+    }
+
+    /// Smoke build only (scenario pont-politique, patch LUM-14 r3): copies of the active document's
+    /// bottom layer above it, each with one `shmd` block holding more than an export keeps: a
+    /// second `cust` item with a located packet (`second`); two packets in one `cust` item (`clean`
+    /// then `twice`); a packet that is not text (`raw`, as raw data); an item that is not `cust`
+    /// (`item`, its data); and the block an export rebuilds, `layerTime` with a located packet
+    /// (`witness`).
+    #[cfg(feature = "evora-smoke")]
+    fn smoke_shmd(&mut self, app: &mut PhotocraftApp, id: &str, p: &crate::ehp::SmokePackets) {
+        use photocraft_psd::descriptor::{Descriptor, Id, UnicodeString, Value, VersionedDescriptor};
+        use photocraft_psd::metadata::{MetadataItem, write_shmd};
+        let cust = |values: Vec<(&str, Value)>| {
+            let items = values.into_iter().map(|(key, value)| (Id::new(key), value)).collect();
+            let d = Descriptor { name: UnicodeString::new_nul(""), class_id: Id::new("metadata"), items };
+            MetadataItem::new(*b"cust", VersionedDescriptor::new(d).to_bytes())
+        };
+        let text = |xmp: &str| Value::Text(UnicodeString::new_nul(xmp));
+        let time = || Value::Double(SMOKE_LAYER_TIME);
+        let blocks = [
+            ("evora-shmd-deux-cust", write_shmd(&[cust(vec![("layerTime", time()), ("layerXMP", text(&p.clean))]), cust(vec![("layerXMP", text(&p.second))])])),
+            ("evora-shmd-deux-paquets", write_shmd(&[cust(vec![("layerXMP", text(&p.clean)), ("layerXMP", text(&p.twice))])])),
+            ("evora-shmd-brut", write_shmd(&[cust(vec![("layerXMP", Value::RawData(p.raw.clone().into_bytes()))])])),
+            (
+                "evora-shmd-element",
+                write_shmd(&[cust(vec![("layerTime", time()), ("layerXMP", text(&p.clean))]), MetadataItem::new(*b"tmln", p.item.clone().into_bytes())]),
+            ),
+            ("evora-shmd-temoin", write_shmd(&[cust(vec![("layerTime", time()), ("layerXMP", text(&p.witness))])])),
+        ];
+        let Some(st) = app.session.active_mut() else {
+            self.bridge.ack(id, false, Some("not_found"));
+            return;
+        };
+        let doc = Arc::make_mut(&mut st.doc);
+        let Some(bottom) = doc.layers.first().cloned() else {
+            self.bridge.ack(id, false, Some("not_found"));
+            return;
+        };
+        for (name, block) in blocks {
+            let mut layer = bottom.duplicate();
+            layer.name = name.to_owned();
+            layer.xmp = None;
+            layer.psd_blocks = vec![(*b"shmd", Arc::new(block))];
+            doc.layers.push(layer);
+        }
         self.bridge.ack(id, true, None);
     }
 

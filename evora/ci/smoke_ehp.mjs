@@ -99,6 +99,19 @@
 // droits, dans les cinq formats, et l'XMP de calque avec sa localisation (TIFF à calques et PSD).
 // Les témoins intacts (marque et droits en « none », droits en « rights », XMP de calque nettoyé en
 // « none ») prouvent que les métadonnées sont lues et réécrites.
+// LUM-14 r3 (constats de la revue de sécurité de LF-3) : avant les exports, la coquille ajoute aussi
+// (evora:smoke-placed et evora:smoke-shmd, absents de l'artefact servi) des objets dynamiques qui
+// placent une photo PNG et une photo JPEG géolocalisées, un document .pcraft géolocalisé, un fichier
+// d'un format que l'export ne sait pas nettoyer et le PNG d'un PSD importé (bloc global lnk2), puis
+// un bloc global que le moteur ne lit pas, une note, et cinq calques dont le bloc shmd tient plus que
+// l'export ne garde (second élément cust, second paquet, paquet qui n'est pas du texte, élément qui
+// n'est pas cust, et le bloc que l'export reconstruit avec son layerTime). Chaque fichier ou bloc
+// nomme son propre lieu (un repère). Jugé dans le TIFF à calques et le PSD : sous « none » et
+// « rights », aucun repère des fichiers placés (politique-incorpore), du bloc global
+// (politique-global) ni des blocs shmd (politique-shmd), et sous « rights » aucune note
+// (politique-notes) ; les objets dynamiques gardent leur fichier nettoyé (noms des fichiers rangés)
+// sauf celui de l'autre format (devenu calque de pixels), et le layerTime reste (témoins intacts) ;
+// sous « all », tout est là. Les fichiers placés sont d'abord relus (étalonnage).
 //
 // Témoins sabordés (SMOKE_SABOTAGE) : le même banc, sur un défaut fabriqué ; un témoin est VALIDE
 // (code 0) seulement si chaque défaut rougit à SON détecteur, à SA place, et si tout le reste du banc
@@ -189,6 +202,24 @@ const POLICY_STRICT = ['png', 'jpg', 'tif', 'webp', 'psd'];
 const POLICY_LAYERED = ['tif', 'psd'];
 const SMOKE_EXPORT = 'evora:smoke-export';
 const SMOKE_LAYER_XMP = 'evora:smoke-layer-xmp';
+// LUM-14 r3 : les crochets de fumée des fichiers placés et des blocs shmd, et les repères que le banc
+// cherche dans les octets exportés (chacun nomme un lieu là où il est rangé : il doit disparaître sous
+// « none » et « rights »).
+const SMOKE_PLACED = 'evora:smoke-placed';
+const SMOKE_SHMD = 'evora:smoke-shmd';
+const PLACED_MARKERS = { png: 'EvoraGeoPng', jpeg: 'EvoraGeoJpeg', linked: 'EvoraGeoLinked', other: 'EvoraGeoOther', nested: 'EvoraGeoNested' };
+// Les fichiers placés tels que l'export les range (bloc lnk2, nom en UTF-16) : présents tant que
+// l'objet dynamique garde son fichier (le document .pcraft placé y devient un PSB) ; celui d'un format
+// que l'export ne sait pas nettoyer fait du calque un calque de pixels sous « none » et « rights ».
+const PLACED_FILES = ['evora-place.png', 'evora-place.jpg', 'evora-place-linked.png', 'evora-place.psb'];
+const PLACED_OTHER = 'evora-place.bin';
+// Le contenu du bloc global que le moteur ne lit pas, l'auteur de la note, le repère des blocs shmd
+// (suivi de A à D selon le bloc) et la clé layerTime que l'export garde (valeurs de host_docs.rs).
+const GLOBAL_MARKER = 'EvoraGeoGlobal';
+const NOTE_MARKER = 'EvoraNoteAuthor';
+const SHMD_MARKER = 'EvoraGeoShmd';
+const SHMD_KEYS = ['A', 'B', 'C', 'D'];
+const LAYER_TIME_KEY = 'layerTime';
 // Plafond transmis dans evora:init : valeur de banc (pas un plafond du produit, D-15), assez large
 // pour la petite image et son document de travail.
 const BENCH_MAX_BYTES = 8 * 1024 * 1024;
@@ -543,6 +574,49 @@ const LAYER_XMP_FIXTURE = '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rd
   + ' xmlns:dc="http://purl.org/dc/elements/1.1/" exif:GPSLongitude="56,7.89E" photoshop:City="Papeete">'
   + `<dc:rights><rdf:Alt><rdf:li xml:lang="x-default">${XMP_RIGHTS}</rdf:li></rdf:Alt></dc:rights>`
   + '</rdf:Description></rdf:RDF></x:xmpmeta>';
+// LUM-14 r3 : un paquet XMP qui nomme une ville (le repère), avec les droits ou sans.
+function placeXmp(city, rights = true) {
+  return '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+    + '<rdf:Description rdf:about="" xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/"'
+    + ` photoshop:City="${city}">`
+    + (rights ? `<dc:rights><rdf:Alt><rdf:li xml:lang="x-default">${XMP_RIGHTS}</rdf:li></rdf:Alt></dc:rights>` : '')
+    + '</rdf:Description></rdf:RDF></x:xmpmeta>';
+}
+// LUM-14 r3 : le paquet des droits seuls (l'élément cust que les blocs shmd du banc gardent).
+const RIGHTS_XMP = '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+  + '<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">'
+  + `<dc:rights><rdf:Alt><rdf:li xml:lang="x-default">${XMP_RIGHTS}</rdf:li></rdf:Alt></dc:rights>`
+  + '</rdf:Description></rdf:RDF></x:xmpmeta>';
+// LUM-14 r3 : une photo JPEG de 32 × 32 (indigo, JFIF, sans autre segment que ceux de l'image),
+// écrite par Pillow pour ce banc (645 octets, en base64 : aucun fichier binaire dans le dépôt).
+const JPEG_BASE = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAAgACADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDxyiiiv7QPKCiiigAooooAKKKKAP/Z';
+function jpegSegment(marker, body) {
+  const len = Buffer.alloc(2);
+  len.writeUInt16BE(body.length + 2);
+  return Buffer.concat([Buffer.from([0xff, marker]), len, body]);
+}
+// LUM-14 r3 : la photo JPEG géolocalisée qu'un objet dynamique place : après l'en-tête JFIF, l'EXIF
+// de la photo du banc (GPS, marque), un XMP qui nomme son lieu et un commentaire.
+function placedJpeg() {
+  const base = Buffer.from(JPEG_BASE, 'base64');
+  const app0End = 4 + base.readUInt16BE(4);
+  return Buffer.concat([base.subarray(0, app0End),
+    jpegSegment(0xe1, Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), exifFixture()])),
+    jpegSegment(0xe1, Buffer.concat([Buffer.from('http://ns.adobe.com/xap/1.0/\0', 'latin1'), Buffer.from(placeXmp(PLACED_MARKERS.jpeg), 'utf8')])),
+    jpegSegment(0xfe, Buffer.from(PLACED_MARKERS.jpeg, 'latin1')),
+    base.subarray(app0End)]);
+}
+// LUM-14 r3 : les fichiers que placent les objets dynamiques (evora:smoke-placed) : PNG et JPEG
+// géolocalisés, le PNG d'un PSD importé, un fichier d'un autre format.
+function placedFiles() {
+  return {
+    png: pngFile([['eXIf', exifFixture()], ['iTXt', itxt('XML:com.adobe.xmp', placeXmp(PLACED_MARKERS.png))], textChunk('Comment', PLACED_MARKERS.png)]),
+    jpeg: placedJpeg(),
+    linked: pngFile([['eXIf', exifFixture()], ['iTXt', itxt('XML:com.adobe.xmp', placeXmp(PLACED_MARKERS.linked))]]),
+    other: Buffer.from(`EVORA-SMOKE ${PLACED_MARKERS.other}\n`, 'latin1'),
+  };
+}
+
 function textChunk(keyword, value) {
   return ['tEXt', Buffer.concat([Buffer.from(keyword, 'latin1'), Buffer.from([0]), Buffer.from(value, 'latin1')])];
 }
@@ -685,6 +759,7 @@ export const WITNESS_JS = `(() => {
 export function harnessJs() {
   const fixture = png().toString('base64');
   const geo = Object.fromEntries(GEO_FIXTURES.map((f) => [f.ref, f.make().toString('base64')]));
+  const placed = Object.fromEntries(Object.entries(placedFiles()).map(([k, v]) => [k, v.toString('base64')]));
   const font = benchFont();
   return `(() => {
   const engine = document.getElementById('engine');
@@ -804,7 +879,14 @@ export function harnessJs() {
     return { bytes: b.length, latitude: latitude(b, true) || latitude(b, false),
       gpsName: /GPSLatitude|GPSLongitude|GPSVersionID|GPSAltitude/i.test(t), place: t.includes('Papeete'),
       make: t.includes(${JSON.stringify(`${EXIF_MAKE} `)}), rights: t.includes(${JSON.stringify(XMP_RIGHTS)}),
-      gps16: ['GPSLatitude', 'GPSLongitude', 'GPSVersionID'].some(has16), place16: has16('Papeete'), rights16: has16(${JSON.stringify(XMP_RIGHTS)}) };
+      gps16: ['GPSLatitude', 'GPSLongitude', 'GPSVersionID'].some(has16), place16: has16('Papeete'), rights16: has16(${JSON.stringify(XMP_RIGHTS)}),
+      // LUM-14 r3 : les repères des fichiers placés, du bloc global et des blocs shmd (en UTF-8 ou en
+      // UTF-16), la note, les fichiers rangés (noms en UTF-16), la clé layerTime.
+      placed: ${JSON.stringify(Object.values(PLACED_MARKERS))}.filter((m) => t.includes(m)),
+      global: t.includes(${JSON.stringify(GLOBAL_MARKER)}), note: t.includes(${JSON.stringify(NOTE_MARKER)}),
+      shmd: ${JSON.stringify(SHMD_KEYS)}.filter((k) => t.includes(${JSON.stringify(SHMD_MARKER)} + k) || has16(${JSON.stringify(SHMD_MARKER)} + k)),
+      files: ${JSON.stringify(PLACED_FILES)}.filter(has16), other: has16(${JSON.stringify(PLACED_OTHER)}),
+      layerTime: t.includes(${JSON.stringify(LAYER_TIME_KEY)}) };
   };
   const log = [];
   const sent = [];
@@ -852,6 +934,9 @@ export function harnessJs() {
     calibrate() { return Object.fromEntries(Object.keys(${JSON.stringify(geo)}).map((ref) => [ref, pngMeta(this.geo(ref))])); },
     // LUM-14 r2 : étalonnage du relevé des octets (scénario pont-politique), sur la photo d'origine.
     scanGeo() { return scanMeta(this.geoPng()); },
+    // LUM-14 r3 : un fichier placé (png, jpeg, linked, other), et le relevé de chacun avant export.
+    placedFile(name) { return Uint8Array.from(atob(${JSON.stringify(placed)}[name]), (c) => c.charCodeAt(0)).buffer; },
+    scanPlaced() { return Object.fromEntries(Object.keys(${JSON.stringify(placed)}).map((k) => [k, scanMeta(this.placedFile(k))])); },
     fontInfo() { return ${JSON.stringify(font ? { family: font.family, format: font.format } : null)}; },
     font() { return Uint8Array.from(atob('${font ? font.b64 : ''}'), (c) => c.charCodeAt(0)).buffer; },
   };
@@ -1309,6 +1394,35 @@ export class EhpBench {
       this.fail('politique-temoin', `calques à XMP propre : ${JSON.stringify(added && added.msg)}`);
       return;
     }
+    // LUM-14 r3 : étalonnage du relevé sur les fichiers placés (chacun localisé, avec la marque et son
+    // repère ; l'autre format avec son repère), puis les objets dynamiques, le bloc global et la note,
+    // puis les blocs shmd.
+    const placedScan = (await this.evaluate(this.page, '__ehp.scanPlaced()')) || {};
+    for (const k of ['png', 'jpeg', 'linked']) {
+      const sc = placedScan[k];
+      if (!sc || !sc.latitude || !sc.make || !sc.placed.includes(PLACED_MARKERS[k])) {
+        this.fail('politique-temoin', `étalonnage : le fichier placé ${k} ne se lit pas localisé, avec la marque et son repère : ${JSON.stringify(sc)}`);
+      }
+    }
+    if (!placedScan.other || !placedScan.other.placed.includes(PLACED_MARKERS.other)) {
+      this.fail('politique-temoin', `étalonnage : le fichier placé other sans son repère : ${JSON.stringify(placedScan.other)}`);
+    }
+    const files = '{ png: __ehp.placedFile("png"), jpeg: __ehp.placedFile("jpeg"), linked: __ehp.placedFile("linked"), '
+      + `other: __ehp.placedFile("other"), nestedXmp: ${JSON.stringify(placeXmp(PLACED_MARKERS.nested))} }`;
+    const placing = await this.send(SMOKE_PLACED, files);
+    const placedAck = await this.waitEngine(this.response('evora:ack', placing), 30000);
+    if (!placedAck || placedAck.msg.payload.ok !== true) {
+      this.fail('politique-temoin', `objets dynamiques : ${JSON.stringify(placedAck && placedAck.msg)}`);
+      return;
+    }
+    const packets = { clean: RIGHTS_XMP, second: placeXmp(`${SHMD_MARKER}A`, false), twice: placeXmp(`${SHMD_MARKER}B`, false),
+      raw: placeXmp(`${SHMD_MARKER}C`, false), item: `${SHMD_MARKER}D`, witness: LAYER_XMP_FIXTURE };
+    const blocks = await this.send(SMOKE_SHMD, JSON.stringify(packets));
+    const shmdAck = await this.waitEngine(this.response('evora:ack', blocks), 15000);
+    if (!shmdAck || shmdAck.msg.payload.ok !== true) {
+      this.fail('politique-temoin', `blocs shmd : ${JSON.stringify(shmdAck && shmdAck.msg)}`);
+      return;
+    }
     for (const ext of POLICY_FORMATS) {
       const mark = (await this.refresh()).log.length;
       const id = await this.send(SMOKE_EXPORT, `{ ext: ${JSON.stringify(ext)} }`);
@@ -1359,6 +1473,36 @@ export class EhpBench {
         }
         if (POLICY_LAYERED.includes(ext) && !(sc.gps16 && sc.place16)) this.fail('politique-toutes', `${where} : XMP de calque sans sa localisation sous « toutes »`);
       }
+      if (POLICY_LAYERED.includes(ext)) this.politiqueCalques(sc, where);
+    }
+  }
+
+  // LUM-14 r3 : objets dynamiques, blocs globaux, notes et blocs shmd d'un export à calques (TIFF, PSD).
+  politiqueCalques(sc, where) {
+    const shmd = (k) => `${SHMD_MARKER}${k}`;
+    if (POLICY !== 'all') {
+      if (sc.placed.length || sc.other) {
+        this.fail('politique-incorpore', `${where} : fichiers placés sortis avec leur lieu (${[...sc.placed, ...(sc.other ? [PLACED_OTHER] : [])].join(', ')})`);
+      }
+      if (sc.global) this.fail('politique-global', `${where} : bloc global que le moteur ne lit pas présent (${GLOBAL_MARKER})`);
+      if (sc.shmd.length) this.fail('politique-shmd', `${where} : blocs shmd sortis avec ce que l'export ne garde pas (${sc.shmd.map(shmd).join(', ')})`);
+      const missing = PLACED_FILES.filter((f) => !sc.files.includes(f));
+      if (missing.length) this.fail('politique-temoin', `${where} : objets dynamiques sans leur fichier nettoyé (${missing.join(', ')}) : la recette ne prouve rien`);
+      if (!sc.layerTime) this.fail('politique-temoin', `${where} : ${LAYER_TIME_KEY} absent des blocs shmd reconstruits : la recette ne prouve rien`);
+    }
+    if (POLICY === 'rights' && sc.note) this.fail('politique-notes', `${where} : note présente sous « droits seuls » (${NOTE_MARKER})`);
+    if (POLICY === 'none' && !sc.note) this.fail('politique-temoin', `${where} : note absente sous « none » : la recette ne prouve rien`);
+    if (POLICY === 'all') {
+      const absent = [
+        ...Object.values(PLACED_MARKERS).filter((m) => !sc.placed.includes(m)),
+        ...PLACED_FILES.filter((f) => !sc.files.includes(f)),
+        ...(sc.other ? [] : [PLACED_OTHER]),
+        ...(sc.global ? [] : [GLOBAL_MARKER]),
+        ...(sc.note ? [] : [NOTE_MARKER]),
+        ...SHMD_KEYS.filter((k) => !sc.shmd.includes(k)).map(shmd),
+        ...(sc.layerTime ? [] : [LAYER_TIME_KEY]),
+      ];
+      if (absent.length) this.fail('politique-toutes', `${where} : sous « toutes », absents : ${absent.join(', ')}`);
     }
   }
 

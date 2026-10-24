@@ -6,23 +6,17 @@
 //! metadata loses what locates the picture, whatever the format writes (PNG, JPEG, WebP, TIFF,
 //! PSD…) and whatever the export dialog chose:
 //! - the GPS directory of its EXIF: IFD0's pointer, the directory and the values it points to;
-//! - the location properties of its XMP, as attributes or as elements, under any namespace prefix
-//!   and in any case: every property whose local name starts with `GPS` or holds `location`
-//!   (shotLocation, LocationShown…), and the place names (City, State, Country, Sublocation…);
-//! - the place datasets of a PSD's IPTC record (image resource 1028);
-//! - in its free-form text (PNG `tEXt`, `zTXt` and `iTXt`, TIFF ASCII tags): the raw profiles that
-//!   other tools write in text (`Raw profile type exif` and `xmp`, hexadecimal, decoded and cleaned
-//!   as above; every other raw profile but a colour profile left out), an entry that holds an XMP
-//!   packet (known by its namespace URIs or by an `xmpmeta` or `RDF` element of any prefix, in any
-//!   case; cleaned as above), and any entry whose keyword or value still names a GPS or a place.
+//! - the location properties of its XMP: every `exif:GPS*` one, and the place names of the
+//!   Photoshop and IPTC schemas, as attributes or as elements;
+//! - the place datasets of a PSD's IPTC record (image resource 1028).
 //!
 //! What the engine cannot read with certainty is left out whole, never passed on unread: an EXIF
-//! block or an IPTC record it cannot walk (every directory of the IFD0 → IFDn chain and of the Exif,
-//! Interoperability and SubIFDs sub-directories is walked, with a bound and a loop check), an EXIF
-//! block with a GPS pointer anywhere but one entry of IFD0, an XMP packet it cannot scan or that
-//! still names a GPS or a place once cleaned (any prefix, any case), a raw profile it cannot
-//! decode. The working document keeps everything: it
+//! block or an IPTC record it cannot walk, an XMP packet it cannot scan, or one that still names
+//! a GPS coordinate once cleaned (another prefix). The working document keeps everything: it
 //! stays the user's own file. Without the bridge, upstream's exports are unchanged.
+
+// SABORDAGE QA (EVORA-LUM-70, témoin des deux revues de LUM-14, retiré par EVORA-LUM-71) : ce
+// fichier est celui d'EVORA-LUM-51 (a3f48b4), d'avant les correctifs d'EVORA-LUM-54 et 55.
 
 use std::sync::Arc;
 
@@ -30,46 +24,13 @@ use photocraft_doc::{Document, Metadata};
 
 /// IFD0's pointer to the GPS directory (TIFF tag 34853).
 const TAG_GPS_IFD: u16 = 0x8825;
-/// The pointers to sub-directories walked for a GPS pointer: Exif, Interoperability, SubIFDs.
-const TAG_SUB_IFDS: [u16; 3] = [0x8769, 0xA005, 0x014A];
-/// The most directories an EXIF block may have before it is left out (a walk bound, not a limit of
-/// the product: real files have a handful).
-const MAX_EXIF_DIRECTORIES: usize = 64;
-/// The XMP namespace URIs that make a text entry an XMP packet (compared in lower case).
-const XMP_URIS: [&str; 2] = ["adobe:ns:meta/", "http://www.w3.org/1999/02/22-rdf-syntax-ns#"];
 /// The PSD image resource of the IPTC-NAA record.
 const IPTC_RESOURCE: u16 = 1028;
 /// IPTC record 2 datasets that name a place: content location code and name, city, sub-location,
 /// province or state, country code and name.
 const IPTC_PLACES: [u8; 7] = [26, 27, 90, 92, 95, 100, 101];
-/// The local names of the XMP properties that name a place (Photoshop, IPTC Core and Extension),
-/// whatever their prefix; every local name that starts with `GPS` names a coordinate.
-const XMP_PLACES: [&str; 14] = [
-    "City",
-    "State",
-    "Country",
-    "CountryCode",
-    "CountryName",
-    "Location",
-    "LocationCreated",
-    "LocationShown",
-    "LocationId",
-    "LocationName",
-    "Sublocation",
-    "ProvinceState",
-    "ProvinceName",
-    "WorldRegion",
-];
-/// What a free-form text entry or a cleaned XMP packet must not hold any more (in any case).
-const GPS_MARK: &str = "gps";
-/// What a property or a text must not hold any more, in any case: a location.
-const LOCATION_MARK: &str = "location";
-/// The raw profiles (`Raw profile type <name>`) kept: cleaned (EXIF, XMP) or without location
-/// (colour profiles). Any other is left out.
-const RAW_PROFILE: &str = "raw profile type ";
-/// Text entries whose keyword names a location (lowercase, as a part of the keyword).
-const TEXT_PLACE_KEYS: [&str; 12] =
-    ["gps", "latitude", "longitude", "location", "sublocation", "city", "state", "country", "province", "region", "place", "geotag"];
+/// What still names a coordinate in a cleaned XMP packet (any namespace prefix).
+const XMP_COORDINATES: [&str; 2] = ["GPSLatitude", "GPSLongitude"];
 
 /// One piece of metadata, once examined.
 enum Edit<T> {
@@ -113,8 +74,7 @@ fn without_location(m: &Metadata) -> Option<Metadata> {
             Edit::Dropped => resources_changed = true,
         }
     }
-    let text = text_without_location(&m.text);
-    if matches!(exif, Edit::Kept) && matches!(xmp, Edit::Kept) && !resources_changed && text.is_none() {
+    if matches!(exif, Edit::Kept) && matches!(xmp, Edit::Kept) && !resources_changed {
         return None;
     }
     let mut out = m.clone();
@@ -131,117 +91,7 @@ fn without_location(m: &Metadata) -> Option<Metadata> {
     if resources_changed {
         out.psd_resources = resources;
     }
-    if let Some(text) = text {
-        out.text = text;
-    }
     Some(out)
-}
-
-/// The free-form text entries without their location; `None` when nothing locates the picture.
-fn text_without_location(entries: &[(String, String)]) -> Option<Vec<(String, String)>> {
-    let mut out = Vec::with_capacity(entries.len());
-    let mut changed = false;
-    for (key, value) in entries {
-        match text_entry(key, value) {
-            Edit::Kept => out.push((key.clone(), value.clone())),
-            Edit::Changed(v) => {
-                out.push((key.clone(), v));
-                changed = true;
-            }
-            Edit::Dropped => changed = true,
-        }
-    }
-    changed.then_some(out)
-}
-
-/// One free-form text entry (see the module docs).
-fn text_entry(key: &str, value: &str) -> Edit<String> {
-    let lower = key.to_ascii_lowercase();
-    let edit = if let Some(name) = lower.strip_prefix(RAW_PROFILE) {
-        raw_profile(name.trim(), value)
-    } else if looks_like_xmp(value) {
-        xmp_without_location(value)
-    } else {
-        Edit::Kept
-    };
-    if matches!(edit, Edit::Dropped) {
-        return Edit::Dropped;
-    }
-    // Whatever is left must name neither a GPS nor a place.
-    let left = match &edit {
-        Edit::Changed(v) => v.as_str(),
-        _ => value,
-    };
-    if TEXT_PLACE_KEYS.iter().any(|k| lower.contains(k)) || names_location(left) {
-        return Edit::Dropped;
-    }
-    edit
-}
-
-/// Is a text value an XMP packet: one of the XMP namespace URIs, or an `xmpmeta` or `RDF` element
-/// of any prefix, in any case?
-fn looks_like_xmp(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    if XMP_URIS.iter().any(|u| lower.contains(u)) {
-        return true;
-    }
-    lower.match_indices('<').any(|(i, _)| {
-        let name = element_name(lower.get(i..).unwrap_or_default());
-        let local = name.rsplit(':').next().unwrap_or(name);
-        local == "xmpmeta" || local == "rdf"
-    })
-}
-
-/// A raw profile in text (`\n<name>\n<length>\n<hexadecimal lines>\n`, as ImageMagick writes
-/// it): EXIF and XMP decoded, cleaned and written again; colour profiles kept; anything else, or
-/// a profile that cannot be decoded, left out.
-fn raw_profile(name: &str, value: &str) -> Edit<String> {
-    if matches!(name, "icc" | "icm") {
-        return Edit::Kept;
-    }
-    if !matches!(name, "exif" | "xmp") {
-        return Edit::Dropped;
-    }
-    let Some(bytes) = raw_profile_bytes(value) else { return Edit::Dropped };
-    let cleaned = if name == "exif" {
-        exif_without_gps(&bytes)
-    } else {
-        match std::str::from_utf8(&bytes).map(xmp_without_location) {
-            Ok(Edit::Changed(x)) => Edit::Changed(x.into_bytes()),
-            Ok(Edit::Kept) => Edit::Kept,
-            _ => Edit::Dropped,
-        }
-    };
-    match cleaned {
-        Edit::Kept => Edit::Kept,
-        Edit::Changed(b) => Edit::Changed(raw_profile_text(name, &b)),
-        Edit::Dropped => Edit::Dropped,
-    }
-}
-
-/// The bytes of a raw profile: its name, its decimal length, then the hexadecimal digits, which
-/// must give exactly that length. `None` otherwise.
-fn raw_profile_bytes(value: &str) -> Option<Vec<u8>> {
-    let mut words = value.split_whitespace();
-    let _name = words.next()?;
-    let length: usize = words.next()?.parse().ok()?;
-    let hex: String = words.collect();
-    if hex.len() != length.checked_mul(2)? || !hex.bytes().all(|c| c.is_ascii_hexdigit()) {
-        return None;
-    }
-    (0..length).map(|i| hex.get(2 * i..2 * i + 2).and_then(|h| u8::from_str_radix(h, 16).ok())).collect()
-}
-
-/// A raw profile written back in the same form, 72 hexadecimal digits per line.
-fn raw_profile_text(name: &str, bytes: &[u8]) -> String {
-    let mut out = format!("\n{name}\n{:8}\n", bytes.len());
-    for line in bytes.chunks(36) {
-        for b in line {
-            out.push_str(&format!("{b:02x}"));
-        }
-        out.push('\n');
-    }
-    out
 }
 
 /// An EXIF block (with or without its `Exif\0\0` prefix) without its GPS directory.
@@ -304,18 +154,7 @@ fn gps_removed(tiff: &[u8]) -> Option<Option<Vec<u8>>> {
     if end > tiff.len() {
         return None;
     }
-    // Every other directory (the chain after IFD0, and the sub-directories of any of them) must be
-    // walked and hold no GPS pointer; otherwise the block is left out.
-    if !others_clean(&r, ifd0)? {
-        return None;
-    }
-    let pointers: Vec<usize> = (0..count).filter(|&i| entry(i).and_then(|e| r.u16(e)) == Some(TAG_GPS_IFD)).collect();
-    // More than one GPS pointer: the block is left out whole.
-    let at = match pointers.as_slice() {
-        [] => return Some(None),
-        [at] => *at,
-        _ => return None,
-    };
+    let Some(at) = (0..count).find(|&i| entry(i).and_then(|e| r.u16(e)) == Some(TAG_GPS_IFD)) else { return Some(None) };
     let pointer = entry(at)?;
     let mut out = tiff.to_vec();
     clear_directory(&r, &mut out, r.offset(pointer + 8)?)?;
@@ -326,80 +165,6 @@ fn gps_removed(tiff: &[u8]) -> Option<Option<Vec<u8>>> {
     out.get_mut(end - 12..end)?.fill(0);
     put_u16(&mut out, ifd0, u16::try_from(count - 1).ok()?, le)?;
     Some(Some(out))
-}
-
-/// Walk every directory of the block but IFD0 itself: the chain IFD0 → IFDn (from IFD0's next
-/// offset) and the sub-directories (Exif, Interoperability, SubIFDs) of every directory, IFD0
-/// included. `Some(true)`: walked, no GPS pointer anywhere but in IFD0. `Some(false)`: a GPS
-/// pointer elsewhere. `None`: a directory out of the block, a loop, an unreadable sub-directory
-/// pointer, or more than [`MAX_EXIF_DIRECTORIES`] directories.
-fn others_clean(r: &Reader<'_>, ifd0: usize) -> Option<bool> {
-    let mut seen: Vec<usize> = vec![ifd0];
-    // Directories still to walk (IFD0's own entries are judged by the caller).
-    let mut todo: Vec<usize> = Vec::new();
-    let mut visit = |at: usize, todo: &mut Vec<usize>| -> Option<()> {
-        if at == 0 {
-            return Some(());
-        }
-        if seen.contains(&at) || seen.len() >= MAX_EXIF_DIRECTORIES {
-            return None;
-        }
-        seen.push(at);
-        todo.push(at);
-        Some(())
-    };
-    // IFD0's sub-directories and its next directory.
-    let (next, subs) = directory_links(r, ifd0)?;
-    for at in subs {
-        visit(at, &mut todo)?;
-    }
-    visit(next, &mut todo)?;
-    while let Some(at) = todo.pop() {
-        let count = usize::from(r.u16(at)?);
-        if (0..count).any(|i| r.u16(at + 2 + 12 * i) == Some(TAG_GPS_IFD)) {
-            return Some(false);
-        }
-        let (next, subs) = directory_links(r, at)?;
-        for sub in subs {
-            visit(sub, &mut todo)?;
-        }
-        visit(next, &mut todo)?;
-    }
-    Some(true)
-}
-
-/// The next-directory offset and the sub-directory offsets of the directory at `at`, every entry
-/// inside the block. `None` when the directory, or a sub-directory pointer, cannot be read.
-fn directory_links(r: &Reader<'_>, at: usize) -> Option<(usize, Vec<usize>)> {
-    let count = usize::from(r.u16(at)?);
-    let end = at.checked_add(2 + 12 * count)?.checked_add(4)?;
-    if end > r.b.len() {
-        return None;
-    }
-    let mut subs = Vec::new();
-    for i in 0..count {
-        let e = at + 2 + 12 * i;
-        let tag = r.u16(e)?;
-        if !TAG_SUB_IFDS.contains(&tag) {
-            continue;
-        }
-        // A pointer is a LONG (4) or an IFD (13), one value or several.
-        if !matches!(r.u16(e + 2)?, 4 | 13) {
-            return None;
-        }
-        let n = r.offset(e + 4)?;
-        match n {
-            0 => {}
-            1 => subs.push(r.offset(e + 8)?),
-            _ => {
-                let values = r.offset(e + 8)?;
-                for k in 0..n {
-                    subs.push(r.offset(values.checked_add(k.checked_mul(4)?)?)?);
-                }
-            }
-        }
-    }
-    Some((r.offset(end - 4)?, subs))
 }
 
 /// Zero the directory at `at` (count, entries, next offset) and the values its entries keep
@@ -440,25 +205,13 @@ fn put_u16(out: &mut [u8], at: usize, v: u16, le: bool) -> Option<()> {
     Some(())
 }
 
-/// Does the XMP property `name` (`prefix:local`, any prefix, any case) locate the picture?
+/// Does the XMP property `name` locate the picture?
 fn locates(name: &str) -> bool {
-    let local = name.split_once(':').map_or(name, |(_, local)| local).to_ascii_lowercase();
-    local.starts_with(GPS_MARK) || local.contains(LOCATION_MARK) || XMP_PLACES.iter().any(|p| p.eq_ignore_ascii_case(&local))
-}
-
-/// Does a text (a cleaned XMP packet, or any free-form text value) still name a GPS, a location,
-/// or a place property under any prefix, in any case?
-fn names_location(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    if lower.contains(GPS_MARK) || lower.contains(LOCATION_MARK) {
-        return true;
-    }
-    XMP_PLACES.iter().any(|place| {
-        let needle = format!(":{}", place.to_ascii_lowercase());
-        lower.match_indices(needle.as_str()).any(|(i, _)| {
-            lower.as_bytes().get(i + needle.len()).is_none_or(|&c| c.is_ascii_whitespace() || matches!(c, b'=' | b'>' | b'/'))
-        })
-    })
+    name.starts_with("exif:GPS")
+        || matches!(
+            name,
+            "photoshop:City" | "photoshop:State" | "photoshop:Country" | "Iptc4xmpCore:Location" | "Iptc4xmpCore:CountryCode" | "Iptc4xmpExt:LocationCreated" | "Iptc4xmpExt:LocationShown"
+        )
 }
 
 /// An XMP packet without its location properties: elements (with their content) and attributes.
@@ -500,8 +253,8 @@ fn xmp_without_location(xmp: &str) -> Edit<String> {
         out.push_str(xmp.get(copied..).unwrap_or_default());
     }
     let cleaned = if changed { out.as_str() } else { xmp };
-    // A coordinate or a place left (in text, or in a structure not read): the packet is not passed on.
-    if names_location(cleaned) {
+    // A coordinate left under another prefix: the packet is not passed on.
+    if XMP_COORDINATES.iter().any(|c| cleaned.contains(*c)) {
         return Edit::Dropped;
     }
     if changed { Edit::Changed(out) } else { Edit::Kept }

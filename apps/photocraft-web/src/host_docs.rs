@@ -220,7 +220,10 @@ impl HostDocs {
     /// `evora:font` (patch LUM-11): the file registers its families, listed in the font menus, or
     /// nothing (`invalid_content`).
     fn font(&mut self, app: &mut PhotocraftApp, id: &str, family: &str, bytes: Vec<u8>) {
-        let added = photocraft_ui_egui::served_fonts::inject(app, family, bytes);
+        // SABORDAGE QA (EVORA-LUM-70, témoin de LUM-11, retiré par EVORA-LUM-71) : aucune police
+        // n'est enregistrée.
+        let _ = (&app, &bytes);
+        let added: Vec<String> = Vec::new();
         if added.is_empty() {
             log::warn!("photocraft-web: the host's font {family:?} could not be read as a font");
             self.bridge.ack(id, false, Some("invalid_content"));

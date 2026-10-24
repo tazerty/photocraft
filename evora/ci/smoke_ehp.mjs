@@ -63,8 +63,10 @@
 //     prouve, c'est que les métadonnées sont lues et réécrites ; de même pour les trois photos du
 //     constat de la revue du 2026-10-23 (profil brut EXIF en texte, forme ImageMagick, nettoyé et
 //     gardé avec la marque ; EXIF à deux pointeurs GPS, sans GPS en sortie ; noms de lieu XMP sous un
-//     autre préfixe, retirés, droits gardés) ; l'instrument est étalonné sur chaque photo avant
-//     export (elle doit se lire localisée) ;
+//     autre préfixe, retirés, droits gardés) ; puis pour les trois de la seconde revue (casse : gps,
+//     CITY, shotLocation ; pointeur GPS dans le sous-répertoire Exif ; XMP en texte sous d'autres
+//     préfixes et clé « Place », droits gardés en texte) ; l'instrument est étalonné sur chaque photo
+//     avant export (elle doit se lire localisée) ;
 //   - sélecteur de la coquille (LUM-02) : Fichier › Placer (evora:command file.placeEmbedded)
 //     demande evora:pick {purpose: "import"}, le fichier remis est placé (evora:dirty true) ;
 //     Ctrl+O (Fichier › Ouvrir) demande evora:pick {purpose: "open", multiple}, le fichier remis
@@ -116,6 +118,11 @@ const PICK_UID = '01JZZSMKEDCQMENTREF0000007';
 const RAW_REF = '01JZZSMKEDCQMENTREF0000008';
 const DUAL_REF = '01JZZSMKEDCQMENTREF0000009';
 const PLACE_REF = '01JZZSMKEDCQMENTREF000000A';
+// LUM-14, seconde revue (2026-10-23) : la casse (gps, CITY, shotLocation), un pointeur GPS dans le
+// sous-répertoire Exif, un XMP en texte sous d'autres préfixes et une clé « Place ».
+const CASE_REF = '01JZZSMKEDCQMENTREF000000B';
+const SUB_REF = '01JZZSMKEDCQMENTREF000000C';
+const TEXT_REF = '01JZZSMKEDCQMENTREF000000D';
 const MIME_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
 const STORAGE_NS = 'ab'.repeat(32);
 // E5 : un autre compte du même navigateur, et un autre moteur servi par la même origine.
@@ -400,6 +407,32 @@ function dualExifFixture() {
   return out;
 }
 
+// LUM-14 (seconde revue) : un EXIF dont IFD0 n'a pas de pointeur GPS, mais un pointeur Exif (0x8769)
+// vers un sous-répertoire qui, lui, pointe vers un répertoire GPS à latitude.
+function subExifFixture() {
+  const make = Buffer.from(`${EXIF_MAKE}\0`, 'latin1');
+  const out = Buffer.alloc(110);
+  out.write('II', 0, 'latin1');
+  out.writeUInt16LE(42, 2);
+  out.writeUInt32LE(8, 4);
+  // IFD0 à 8 : marque et pointeur Exif, puis le prochain répertoire (aucun) ; fin à 38 ; marque à 38.
+  out.writeUInt16LE(2, 8);
+  out.writeUInt16LE(0x010f, 10); out.writeUInt16LE(2, 12); out.writeUInt32LE(make.length, 14); out.writeUInt32LE(38, 18);
+  out.writeUInt16LE(0x8769, 22); out.writeUInt16LE(4, 24); out.writeUInt32LE(1, 26); out.writeUInt32LE(50, 30);
+  out.writeUInt32LE(0, 34);
+  make.copy(out, 38);
+  // Sous-répertoire Exif à 50 : un pointeur GPS vers 68 ; fin à 68.
+  out.writeUInt16LE(1, 50);
+  out.writeUInt16LE(0x8825, 52); out.writeUInt16LE(4, 54); out.writeUInt32LE(1, 56); out.writeUInt32LE(68, 60);
+  out.writeUInt32LE(0, 64);
+  // Répertoire GPS à 68 : la latitude à 86 ; fin à 110.
+  out.writeUInt16LE(1, 68);
+  out.writeUInt16LE(2, 70); out.writeUInt16LE(5, 72); out.writeUInt32LE(3, 74); out.writeUInt32LE(86, 78);
+  out.writeUInt32LE(0, 82);
+  GPS_LATITUDE.forEach((w, k) => out.writeUInt32LE(w, 86 + 4 * k));
+  return out;
+}
+
 // LUM-14 (revue) : un profil brut en texte, tel qu'ImageMagick l'écrit : « \n<nom>\n<longueur sur 8>\n »,
 // puis l'hexadécimal par lignes de 72 chiffres.
 function rawProfile(name, bytes) {
@@ -429,6 +462,23 @@ const XMP_PLACES_FIXTURE = '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x
   + `<dc:rights><rdf:Alt><rdf:li xml:lang="x-default">${XMP_RIGHTS}</rdf:li></rdf:Alt></dc:rights>`
   + '</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>';
 
+// LUM-14 (seconde revue) : la casse ne doit rien sauver (exif:gpsLatitude, ps2:CITY), ni un nom local
+// qui contient « location » (xmpDM:shotLocation) ; les droits restent (témoin intact).
+const XMP_CASE_FIXTURE = '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/">'
+  + '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about=""'
+  + ' xmlns:exif="http://ns.adobe.com/exif/1.0/" xmlns:ps2="http://ns.adobe.com/photoshop/1.0/"'
+  + ' xmlns:xmpDM="http://ns.adobe.com/xmp/1.0/DynamicMedia/" xmlns:dc="http://purl.org/dc/elements/1.1/"'
+  + ' exif:gpsLatitude="12,34.56N" ps2:CITY="Papeete" xmpDM:shotLocation="Papeete">'
+  + `<dc:rights><rdf:Alt><rdf:li xml:lang="x-default">${XMP_RIGHTS}</rdf:li></rdf:Alt></dc:rights>`
+  + '</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>';
+// LUM-14 (seconde revue) : un XMP rangé en texte libre, d'autres préfixes et d'autre casse (seule
+// l'URI le dit XMP), puis une clé « Place », puis les droits en texte (témoin intact).
+const XMP_TEXT_FIXTURE = '<X:XmpMeta xmlns:X="adobe:ns:meta/"><Rdf:RDF xmlns:Rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+  + '<Rdf:Description xmlns:ps2="http://ns.adobe.com/photoshop/1.0/" ps2:City="Papeete"/></Rdf:RDF></X:XmpMeta>';
+function textChunk(keyword, value) {
+  return ['tEXt', Buffer.concat([Buffer.from(keyword, 'latin1'), Buffer.from([0]), Buffer.from(value, 'latin1')])];
+}
+
 function itxt(keyword, text) {
   return Buffer.concat([Buffer.from(keyword, 'latin1'), Buffer.from([0, 0, 0, 0, 0]), Buffer.from(text, 'utf8')]);
 }
@@ -449,6 +499,16 @@ function dualPng() {
 function placePng() {
   return pngFile([['iTXt', itxt('XML:com.adobe.xmp', XMP_PLACES_FIXTURE)]]);
 }
+// LUM-14 : les trois photos de la seconde revue.
+function casePng() {
+  return pngFile([['iTXt', itxt('XML:com.adobe.xmp', XMP_CASE_FIXTURE)]]);
+}
+function subPng() {
+  return pngFile([['eXIf', subExifFixture()]]);
+}
+function textPng() {
+  return pngFile([textChunk('Comment', XMP_TEXT_FIXTURE), textChunk('Place', 'Papeete'), textChunk('Copyright', XMP_RIGHTS)]);
+}
 
 // Les photos géolocalisées du banc, par docRef (LUM-14).
 const GEO_FIXTURES = [
@@ -456,6 +516,9 @@ const GEO_FIXTURES = [
   { ref: RAW_REF, name: 'evora-brut.png', make: rawPng },
   { ref: DUAL_REF, name: 'evora-double.png', make: dualPng },
   { ref: PLACE_REF, name: 'evora-lieux.png', make: placePng },
+  { ref: CASE_REF, name: 'evora-casse.png', make: casePng },
+  { ref: SUB_REF, name: 'evora-sous-ifd.png', make: subPng },
+  { ref: TEXT_REF, name: 'evora-texte.png', make: textPng },
 ];
 
 // LUM-11 : la plus petite police TrueType ou OpenType du dossier des polices servies (quatrième
@@ -604,9 +667,10 @@ export function harnessJs() {
     if (b.length < 8 || sig.some((v, i) => b[i] !== v)) return null;
     const dv = new DataView(buf);
     const out = { exif: false, make: false, gpsTag: false, latitude: false, xmp: false, compressed: false, rights: false, location: false,
-      raw: false, rawMake: false, rawGps: false, rawLatitude: false, textLocation: false, textCompressed: false };
+      raw: false, rawMake: false, rawGps: false, rawLatitude: false, textLocation: false, textCompressed: false, textRights: false };
     const text = (key, value) => {
       if (/gps|papeete|latitude|longitude/i.test(key) || /gps|papeete/i.test(value)) out.textLocation = true;
+      if (value.includes(${JSON.stringify(XMP_RIGHTS)})) out.textRights = true;
       if (/^raw profile type exif$/i.test(key)) {
         const w = value.trim().split(/\\s+/);
         const hex = w.slice(2).join('');
@@ -653,7 +717,7 @@ export function harnessJs() {
             q = data.indexOf(0, q) + 1;
             const text = new TextDecoder().decode(data.subarray(q));
             out.rights = text.includes(${JSON.stringify(XMP_RIGHTS)});
-            out.location = /GPS|Papeete/.test(text);
+            out.location = /gps|papeete/i.test(text);
           }
         }
       }
@@ -1089,6 +1153,9 @@ export class EhpBench {
       [RAW_REF]: (g) => g.raw && g.rawGps && g.rawLatitude,
       [DUAL_REF]: (g) => g.gpsTag && g.latitude,
       [PLACE_REF]: (g) => g.location && g.rights,
+      [CASE_REF]: (g) => g.location && g.rights,
+      [SUB_REF]: (g) => g.latitude && !g.gpsTag,
+      [TEXT_REF]: (g) => g.textLocation && g.textRights,
     };
     for (const f of GEO_FIXTURES) {
       const g = cal && cal[f.ref];
@@ -1864,6 +1931,11 @@ export class EhpBench {
       [DUAL_REF]: (g) => [g.exif && g.gpsTag && 'pointeur GPS restant dans IFD0 (deux pointeurs)', g.exif && g.latitude && 'valeurs de latitude restantes (deux répertoires)'],
       [PLACE_REF]: (g) => [(!g.xmp || g.compressed || !g.rights) && `XMP absent, compressé ou sans les droits (xmp ${g.xmp}, compressé ${g.compressed}, droits ${g.rights})`,
         g.location && 'nom de lieu (ps2:City, Sublocation) dans le XMP'],
+      [CASE_REF]: (g) => [(!g.xmp || g.compressed || !g.rights) && `XMP absent, compressé ou sans les droits (xmp ${g.xmp}, compressé ${g.compressed}, droits ${g.rights})`,
+        g.location && 'GPS ou lieu restant malgré la casse (exif:gpsLatitude, ps2:CITY, xmpDM:shotLocation)'],
+      [SUB_REF]: (g) => [g.exif && g.gpsTag && 'pointeur GPS dans IFD0', g.exif && g.latitude && 'latitude restante (pointeur GPS du sous-répertoire Exif)'],
+      [TEXT_REF]: (g) => [!g.textRights && 'droits absents du texte : la recette ne prouve rien', g.textCompressed && 'texte compressé, illisible pour le banc',
+        g.textLocation && 'GPS ou lieu restant dans le texte (XMP sous autre préfixe, clé Place)'],
     };
     for (const e of msgs.filter((x) => x.msg && x.msg.type === 'evora:export' && geoVerdict[(x.msg.payload || {}).docRef])) {
       const g = e.png;

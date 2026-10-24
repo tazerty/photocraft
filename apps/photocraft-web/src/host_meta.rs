@@ -59,6 +59,14 @@
 //!   location. A block that holds more than one packet, or a packet that is not text, is left out
 //!   whole, and so is every other item (the layer comp states, which the exporter writes again from
 //!   the document's comps, the timeline, anything else).
+//!
+//! Patch LUM-14 r4 (the verification of r3): a placed PNG or JPEG cleaned of its metadata keeps
+//! what the engine reads from it to show it, written back as one EXIF directory without anything
+//! else (module `geometry`): the Orientation that turns its pixels upright, and the resolution its
+//! metadata records. A phone photo placed in a smart object thus leaves an export upright, at its
+//! size and resolution, under `none` as under `rights`.
+
+mod geometry;
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -456,9 +464,11 @@ fn file_for_export(name: &str, bytes: &[u8], scope: &Scope<'_>) -> Option<Vec<u8
     photocraft_io::export(doc, "pcraft", &photocraft_io::ExportOptions::default()).ok().map(|r| r.bytes)
 }
 
-/// A PNG with the chunks of [`PNG_KEPT`] alone, each copied as it is; whatever follows `IEND` is
+/// A PNG with the chunks of [`PNG_KEPT`] alone, each copied as it is, and after its header the
+/// `eXIf` chunk of its geometry (patch LUM-14 r4, module `geometry`); whatever follows `IEND` is
 /// left out. `None` when the chunks cannot be walked up to `IEND`.
 fn png_without_metadata(b: &[u8]) -> Option<Vec<u8>> {
+    let mut exif = geometry::png(b).exif().and_then(|tiff| geometry::png_exif_chunk(&tiff));
     let mut out = PNG_SIGNATURE.to_vec();
     let mut at = PNG_SIGNATURE.len();
     loop {
@@ -468,6 +478,11 @@ fn png_without_metadata(b: &[u8]) -> Option<Vec<u8>> {
         let kind: [u8; 4] = chunk.get(4..8)?.try_into().ok()?;
         if PNG_KEPT.contains(&kind) {
             out.extend_from_slice(chunk);
+            if kind == *b"IHDR"
+                && let Some(written) = exif.take()
+            {
+                out.extend_from_slice(&written);
+            }
         }
         if kind == *b"IEND" {
             return Some(out);
@@ -477,10 +492,12 @@ fn png_without_metadata(b: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// A JPEG with the segments of [`jpeg_segment_kept`] alone, each copied as it is, and its scans'
-/// coded data; whatever follows the end of image is left out (the further pictures of a
+/// coded data, with the EXIF segment of its geometry after the JFIF header (patch LUM-14 r4,
+/// module `geometry`); whatever follows the end of image is left out (the further pictures of a
 /// multi-picture file among them). `None` when the segments cannot be walked up to the end of
 /// image.
 fn jpeg_without_metadata(b: &[u8]) -> Option<Vec<u8>> {
+    let mut exif = geometry::jpeg(b).exif().and_then(|tiff| geometry::jpeg_exif_segment(&tiff));
     let mut out = JPEG_SOI.to_vec();
     let mut at = JPEG_SOI.len();
     loop {
@@ -511,6 +528,11 @@ fn jpeg_without_metadata(b: &[u8]) -> Option<Vec<u8>> {
         let segment = b.get(at..at.checked_add(length)?).filter(|_| length >= 2)?;
         let kept = jpeg_segment_kept(marker, segment);
         if kept {
+            if marker != 0xE0
+                && let Some(written) = exif.take()
+            {
+                out.extend_from_slice(&written);
+            }
             out.extend_from_slice(&[0xFF, marker]);
             out.extend_from_slice(segment);
         }

@@ -158,6 +158,15 @@ pub enum HostEvent {
     Saved { re: String, ok: bool, doc_ref: Option<String> },
     /// `evora:font {family, format, bytes}` (patch LUM-11): a font file to register.
     Font { id: String, family: String, bytes: Vec<u8> },
+    /// Smoke build only (`--features evora-smoke`, never the served artifact; scenario
+    /// pont-politique of `evora/ci/smoke_ehp.mjs`, patch LUM-14 r2): the active document exported
+    /// as `ext` through the export service.
+    #[cfg(feature = "evora-smoke")]
+    SmokeExport { id: String, ext: String },
+    /// Smoke build only (same scenario): two copies of the active document's bottom layer, one
+    /// with `xmp` as its own packet, the other with `xmp` in a raw `shmd` block.
+    #[cfg(feature = "evora-smoke")]
+    SmokeLayerXmp { id: String, xmp: String },
 }
 
 /// A save handed to the host, bound to its document at the end of the frame (`host_docs`).
@@ -510,6 +519,9 @@ impl Bridge {
             // A file answering the engine's picker (patch LUM-02, §4.3).
             "evora:file" => Some("pick.drive"),
             "evora:font" => Some("font.inject"),
+            // Smoke build only (patch LUM-14 r2): the export scenario of the CI.
+            #[cfg(feature = "evora-smoke")]
+            "evora:smoke-export" | "evora:smoke-layer-xmp" => None,
             // The host's answer to an `evora:export` (patch LUM-03) or the close of a picker
             // (patch LUM-02): read only when it answers one of them (`on_ack`), each sent only
             // with its capability effective; any other is ignored.
@@ -558,6 +570,8 @@ impl Bridge {
             "evora:ack" => self.on_ack(re.as_deref(), &payload),
             "evora:file" => self.on_file(re.as_deref(), &payload),
             "evora:font" => self.on_font(&id, &payload),
+            #[cfg(feature = "evora-smoke")]
+            "evora:smoke-export" | "evora:smoke-layer-xmp" => self.on_smoke(&kind, &id, &payload),
             _ => {}
         }
     }
@@ -764,6 +778,19 @@ impl Bridge {
         }
         let data = js_sys::Uint8Array::new(&bytes).to_vec();
         self.push(HostEvent::Font { id: id.to_owned(), family, bytes: data });
+    }
+
+    /// Smoke build only (patch LUM-14 r2, scenario pont-politique): `evora:smoke-export {ext}`, one of
+    /// the formats the scenario reads; `evora:smoke-layer-xmp {xmp}`.
+    #[cfg(feature = "evora-smoke")]
+    fn on_smoke(&self, kind: &str, id: &str, p: &JsValue) {
+        if kind == "evora:smoke-export" {
+            if let Some(ext) = get(p, "ext").as_string().filter(|e| matches!(e.as_str(), "png" | "jpg" | "tif" | "webp" | "psd")) {
+                self.push(HostEvent::SmokeExport { id: id.to_owned(), ext });
+            }
+        } else if let Some(xmp) = get(p, "xmp").as_string() {
+            self.push(HostEvent::SmokeLayerXmp { id: id.to_owned(), xmp });
+        }
     }
 
     fn on_request_save(&self, id: &str, p: &JsValue) {

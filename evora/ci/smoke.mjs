@@ -30,6 +30,11 @@
 // panique doit envoyer un seul evora:failed {code: "panic"}. Les erreurs de page qui suivent la
 // demande sont celles de la panique : comptées à part.
 //
+// SMOKE_SCENARIO=pont-politique (patch LUM-14 r2) : sur le build de fumée seulement, avec
+// SMOKE_POLICY=none|rights|all, la coquille minimale impose la politique de localisation, ajoute deux
+// calques à XMP propre à la photo géolocalisée et l'exporte dans cinq formats ; les octets reçus sont
+// jugés (evora/ci/smoke_ehp.mjs, qui décrit ce qu'il exige).
+//
 // SMOKE_SABOTAGE=banc|moteur (avec pont-ehp) ou muet (avec pont-muet) : témoin sabordé du banc ; le
 // passage sort en 0 seulement si le verdict exact du témoin est VALIDE (smoke_ehp.mjs, witness).
 import { spawn } from 'node:child_process';
@@ -62,15 +67,18 @@ const EXPECT_FONTS = process.env.SMOKE_EXPECT_FONTS === '1';
 const SCENARIO = process.env.SMOKE_SCENARIO || 'hors-pont';
 // LUM-04 : panique du build de fumée, sous la même coquille minimale.
 const PANIQUE = SCENARIO === ehp.PANIC_SCENARIO;
-const EHP = SCENARIO === ehp.SCENARIO || PANIQUE;
+// LUM-14 r2 : politique de localisation des exports, sur le build de fumée.
+const POLITIQUE = SCENARIO === ehp.POLICY_SCENARIO;
+const EHP = SCENARIO === ehp.SCENARIO || PANIQUE || POLITIQUE;
 // E4 : pont muet (evora-host.json de l'artefact, vide).
 const MUET = SCENARIO === 'pont-muet';
-if (!['hors-pont', ehp.SCENARIO, 'pont-muet', ehp.PANIC_SCENARIO].includes(SCENARIO)) throw new Error(`SMOKE_SCENARIO inconnu : ${SCENARIO}`);
+if (!['hors-pont', ehp.SCENARIO, 'pont-muet', ehp.PANIC_SCENARIO, ehp.POLICY_SCENARIO].includes(SCENARIO)) throw new Error(`SMOKE_SCENARIO inconnu : ${SCENARIO}`);
+if (POLITIQUE !== Boolean(ehp.POLICY)) throw new Error(`SMOKE_POLICY (${ehp.POLICY || 'absente'}) va avec le scénario ${ehp.POLICY_SCENARIO} et lui seul`);
 // Témoins sabordés : banc et moteur sur pont-ehp, muet sur pont-muet.
 const SABOTAGE = ehp.SABOTAGE;
 if (SABOTAGE && (SABOTAGE === 'muet') !== MUET) throw new Error(`témoin ${SABOTAGE} incompatible avec le scénario ${SCENARIO}`);
 if (SABOTAGE && !EHP && !MUET) throw new Error(`témoin ${SABOTAGE} sans scénario de pont`);
-if (SABOTAGE && PANIQUE) throw new Error(`aucun témoin sabordé pour ${SCENARIO}`);
+if (SABOTAGE && (PANIQUE || POLITIQUE)) throw new Error(`aucun témoin sabordé pour ${SCENARIO}`);
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -416,6 +424,7 @@ async function main() {
     if (bench) {
       try {
         if (PANIQUE) await bench.panic(() => { panicSent = true; });
+        else if (POLITIQUE) await bench.politique();
         else await bench.session();
       } catch (e) {
         bench.fail('bench', `scénario interrompu : ${e.message}`);
@@ -530,6 +539,7 @@ async function main() {
     `| Canvas | ${last && last.canvas ? `${last.canvas.width}×${last.canvas.height}` : 'absent'} |`,
     `| Titre du document moteur | ${last ? last.title : '—'} |`,
     `| Scénario | ${SCENARIO} |`,
+    ...(POLITIQUE ? [`| Politique de localisation | ${ehp.POLICY} |`] : []),
     `| Paramètres du moteur | \`?${QUERY}\` |`,
     ...(report.ehp ? [`| Échanges EHP vus de la page parente | ${report.ehp.exchanges.length} message(s) du moteur |`] : []),
     ...(PANIQUE ? [`| Erreurs de page après la demande de panique (attendues) | ${report.afterPanic.length} |`] : []),

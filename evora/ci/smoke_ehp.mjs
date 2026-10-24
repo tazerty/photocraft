@@ -73,9 +73,32 @@
 //     Ctrl+O (Fichier › Ouvrir) demande evora:pick {purpose: "open", multiple}, le fichier remis
 //     s'ouvre (un document de plus) ; annulé, rien ne s'ouvre ; un nouveau Ctrl+O redemande
 //     (aucun sélecteur resté ouvert) ;
+//   - thème Evora révisé (LUM-06 r2) : diag.stats rend les jetons du thème et les traits d'egui ;
+//     à l'init (clair, accent de la coquille autre que l'indigo), puis après chaque evora:theme
+//     (sombre en indigo, clair et sombre en d'autres accents), bords de champ #71717A à 3:1 au
+//     moins sur les champs et les panneaux, entourage du canevas neutre (R = G = B), accent et
+//     anneau de focus à 3:1 au moins sur les surfaces, bord d'accent opaque, texte d'accent à 4,5:1
+//     au moins, bouton principal lisible ; le bouton principal prend l'accent reçu, le thème le
+//     clair ou le sombre demandé ;
+//   - préférences de evora:init (LUM-14 r2 et LUM-15, première moitié) : la politique de
+//     localisation reçue, l'entourage du canevas réglé par la coquille (gris moyen, dessiné
+//     #535353), une préférence du moteur hors liste et une clé inconnue refusées ;
 //   - aucune enveloppe hors norme (champ inconnu, version, type, ids, charge utile) et aucun
 //     evora:failed ; chaque capacité annoncée est exercée par ce scénario.
 // Chaque contrôle porte une étiquette [ehp:…] dans la liste des problèmes du rapport.
+//
+// SMOKE_SCENARIO=pont-politique (LUM-14 r2), sur le build de fumée (feature evora-smoke) seulement,
+// avec SMOKE_POLICY=none|rights|all : la coquille impose la politique de localisation dans
+// evora:init, ouvre la photo géolocalisée, lui ajoute deux calques à XMP propre (l'un dans
+// Layer::xmp, l'autre dans un bloc shmd brut, comme un document d'une version antérieure ; message
+// evora:smoke-layer-xmp, absent de l'artefact servi), puis l'exporte en PNG, JPEG, TIFF, WebP et PSD
+// par le service d'export du moteur (evora:smoke-export, absent de l'artefact servi). Jugé sur les
+// octets reçus : « none » et « rights » ne laissent sortir aucune localisation (latitude GPS, nom de
+// propriété GPS, lieu), ni dans un XMP de calque (UTF-16 du PSD) ; « rights » ne laisse sortir ni
+// la marque de l'appareil ni un XMP de calque ; « all » garde la localisation, la marque et les
+// droits (PNG et PSD, qui écrivent à coup sûr EXIF et XMP ; les autres formats sont relevés). Les
+// témoins intacts (marque et droits en « none », droits en « rights ») prouvent que les métadonnées
+// sont lues et réécrites.
 //
 // Témoins sabordés (SMOKE_SABOTAGE) : le même banc, sur un défaut fabriqué ; un témoin est VALIDE
 // (code 0) seulement si chaque défaut rougit à SON détecteur, à SA place, et si tout le reste du banc
@@ -132,6 +155,33 @@ const FOREIGN_KEY = 'autre-moteur:reglages';
 const FOREIGN_DB = 'autre-moteur.cache';
 const PREFS = 'photocraft.preferences';
 const PRESETS = 'photocraft.presets';
+// LUM-06 r2 : l'accent de la coquille dans evora:init (autre que l'indigo d'Evora, pour que son
+// application se voie), les evora:theme suivants, et les valeurs que le thème doit tenir.
+const INIT_ACCENT = '#0E7490';
+const EVORA_ACCENT = '#4F46E5';
+const THEME_STEPS = [{ theme: 'light', accent: '#BE185D', kind: 'evoraLight' }, { theme: 'dark', accent: '#B45309', kind: 'evora' }];
+const FIELD_BORDER = '#71717A';
+const THEME_KEYS = ['accent', 'accentText', 'accentBorder', 'accentSoft', 'primaryBg', 'primaryText', 'fieldBorder', 'field', 'card', 'chrome',
+  'dock', 'hover', 'pressed', 'canvas', 'canvasDot', 'inactiveBorder', 'activeBorder', 'selectionStroke'];
+// LUM-14 r2 et LUM-15 : préférences imposées par la coquille dans evora:init (engines.json,
+// prefs.imposed) ; le moteur doit prendre les deux premières et refuser les deux autres (une
+// préférence du moteur hors de sa liste, une clé inconnue).
+const BENCH_PREFS = { 'evora.locationPolicy': 'none', 'interface.canvasColor': 'mediumGray', 'interface.canvasBorder': 'line', 'evora.inconnue': 'x' };
+const BENCH_REFUSED = ['evora.inconnue', 'interface.canvasBorder'];
+// Le gris moyen de l'entourage du canevas (Préférences › Interface du moteur).
+const MEDIUM_GRAY = '#535353';
+// LUM-14 r2 : scénario pont-politique (build de fumée), la politique imposée, le document et les
+// formats exportés.
+export const POLICY_SCENARIO = 'pont-politique';
+export const POLICY = process.env.SMOKE_POLICY || '';
+if (!['', 'none', 'rights', 'all'].includes(POLICY)) throw new Error(`SMOKE_POLICY inconnue : ${POLICY}`);
+const POLICY_REF = '01JZZSMKEDCQMENTREF000000E';
+const POLICY_FORMATS = ['png', 'jpg', 'tif', 'webp', 'psd'];
+// Formats dont l'écriture d'EXIF et de XMP est certaine (prouvée par les exports du banc pont-ehp
+// pour le PNG ; écrite sans condition par l'exportateur PSD) : leurs témoins intacts sont exigés.
+const POLICY_STRICT = ['png', 'psd'];
+const SMOKE_EXPORT = 'evora:smoke-export';
+const SMOKE_LAYER_XMP = 'evora:smoke-layer-xmp';
 // Plafond transmis dans evora:init : valeur de banc (pas un plafond du produit, D-15), assez large
 // pour la petite image et son document de travail.
 const BENCH_MAX_BYTES = 8 * 1024 * 1024;
@@ -198,6 +248,9 @@ export const BANC_SABOTAGES = [
   { tag: 'ehp:focus-out', kind: 'message' },
   { tag: 'ehp:export-no-gps', kind: 'message' },
   { tag: 'ehp:pick', kind: 'message' },
+  { tag: 'ehp:theme-r2', kind: 'message' },
+  { tag: 'ehp:theme-accent', kind: 'message' },
+  { tag: 'ehp:prefs-init', kind: 'message' },
 ];
 // Témoin « moteur » (removeItem, clear et deleteDatabase sans effet) : les rouges attendus, chacun à
 // son contrôle. Les restes non effacés font aussi rougir les témoins de purge et la réécriture : ce
@@ -476,6 +529,13 @@ const XMP_CASE_FIXTURE = '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:x
 // l'URI le dit XMP), puis une clé « Place », puis les droits en texte (témoin intact).
 const XMP_TEXT_FIXTURE = '<X:XmpMeta xmlns:X="adobe:ns:meta/"><Rdf:RDF xmlns:Rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
   + '<Rdf:Description xmlns:ps2="http://ns.adobe.com/photoshop/1.0/" ps2:City="Papeete"/></Rdf:RDF></X:XmpMeta>';
+// LUM-14 r2 (scénario pont-politique) : l'XMP propre d'un calque : longitude GPS et ville, puis les
+// droits (témoin intact).
+const LAYER_XMP_FIXTURE = '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+  + '<rdf:Description rdf:about="" xmlns:exif="http://ns.adobe.com/exif/1.0/" xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"'
+  + ' xmlns:dc="http://purl.org/dc/elements/1.1/" exif:GPSLongitude="56,7.89E" photoshop:City="Papeete">'
+  + `<dc:rights><rdf:Alt><rdf:li xml:lang="x-default">${XMP_RIGHTS}</rdf:li></rdf:Alt></dc:rights>`
+  + '</rdf:Description></rdf:RDF></x:xmpmeta>';
 function textChunk(keyword, value) {
   return ['tEXt', Buffer.concat([Buffer.from(keyword, 'latin1'), Buffer.from([0]), Buffer.from(value, 'latin1')])];
 }
@@ -726,6 +786,19 @@ export function harnessJs() {
     }
     return out;
   };
+  // LUM-14 r2 : ce que les octets d'un export contiennent, quel que soit le format : la latitude
+  // GPS (24 octets, dans les deux ordres), un nom de propriété GPS, le lieu, la marque de l'appareil
+  // (chaîne EXIF terminée par NUL), les droits ; puis la même chose en UTF-16 (XMP de calque du PSD).
+  const scanMeta = (buf) => {
+    const b = new Uint8Array(buf);
+    const t = latin1(b);
+    const wide = (w) => [Array.from(w, (ch) => ch + '\0').join(''), Array.from(w, (ch) => '\0' + ch).join('')];
+    const has16 = (w) => wide(w).some((x) => t.includes(x));
+    return { bytes: b.length, latitude: latitude(b, true) || latitude(b, false),
+      gpsName: /GPSLatitude|GPSLongitude|GPSVersionID|GPSAltitude/i.test(t), place: t.includes('Papeete'),
+      make: t.includes(${JSON.stringify(`${EXIF_MAKE} `)}), rights: t.includes(${JSON.stringify(XMP_RIGHTS)}),
+      gps16: ['GPSLatitude', 'GPSLongitude', 'GPSVersionID'].some(has16), place16: has16('Papeete'), rights16: has16(${JSON.stringify(XMP_RIGHTS)}) };
+  };
   const log = [];
   const sent = [];
   addEventListener('message', (e) => {
@@ -736,6 +809,7 @@ export function harnessJs() {
     try { entry.msg = plain ? summarize(d) : String(d).slice(0, 200); } catch (err) { entry.msg = 'illisible'; }
     if (plain && d.type === 'evora:export' && d.payload && d.payload.bytes instanceof ArrayBuffer) {
       try { entry.png = pngMeta(d.payload.bytes); } catch (err) { entry.png = 'illisible'; }
+      try { entry.scan = scanMeta(d.payload.bytes); } catch (err) { entry.scan = 'illisible'; }
     }
     log.push(entry);
   });
@@ -769,6 +843,8 @@ export function harnessJs() {
     geoPng() { return this.geo(${JSON.stringify(GPS_REF)}); },
     // Étalonnage de l'instrument (LUM-14) : ce que pngMeta lit dans chaque photo du banc avant export.
     calibrate() { return Object.fromEntries(Object.keys(${JSON.stringify(geo)}).map((ref) => [ref, pngMeta(this.geo(ref))])); },
+    // LUM-14 r2 : étalonnage du relevé des octets (scénario pont-politique), sur la photo d'origine.
+    scanGeo() { return scanMeta(this.geoPng()); },
     fontInfo() { return ${JSON.stringify(font ? { family: font.family, format: font.format } : null)}; },
     font() { return Uint8Array.from(atob('${font ? font.b64 : ''}'), (c) => c.charCodeAt(0)).buffer; },
   };
@@ -809,8 +885,81 @@ const keyDown = (key, code, mods = {}) => `(() => {
 })()`;
 
 function initPayload(capabilities) {
-  return { lang: 'fr', engineLang: 'fr', theme: 'light', accent: '#4F46E5', readOnly: false, storageNs: STORAGE_NS,
-    capabilities, prefs: {}, limits: { maxDocumentBytes: BENCH_MAX_BYTES, maxExportBytes: BENCH_MAX_BYTES } };
+  // LUM-14 r2 : le scénario pont-politique n'impose que la politique de localisation.
+  const prefs = POLICY ? { 'evora.locationPolicy': POLICY } : BENCH_PREFS;
+  return { lang: 'fr', engineLang: 'fr', theme: 'light', accent: INIT_ACCENT, readOnly: false, storageNs: STORAGE_NS,
+    capabilities, prefs, limits: { maxDocumentBytes: BENCH_MAX_BYTES, maxExportBytes: BENCH_MAX_BYTES } };
+}
+
+// LUM-06 r2 : une couleur #RRGGBB ou #RRGGBBAA du rapport de thème, en [r, g, b, a], ou null.
+function rgba(text) {
+  const m = /^#([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})?$/i.exec(String(text || ''));
+  return m ? [1, 2, 3, 4].map((i) => (m[i] === undefined ? 255 : parseInt(m[i], 16))) : null;
+}
+const hex6 = (c) => `#${c.slice(0, 3).map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase()}`;
+// Rapport de contraste WCAG 2 de deux couleurs opaques.
+function contrast(a, b) {
+  const lin = (v) => { const c = v / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  const lum = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+// LUM-06 r2 (E2-a, E2-b, E2-d) : ce que le thème doit tenir, quelle que soit la teinte.
+export function themeProblems(t) {
+  if (!t || typeof t !== 'object') return ['rapport de thème absent'];
+  const c = Object.fromEntries(THEME_KEYS.map((k) => [k, rgba(t[k])]));
+  const unread = THEME_KEYS.filter((k) => !c[k]);
+  if (unread.length) return [`couleurs illisibles : ${unread.join(', ')}`];
+  const out = [];
+  if (hex6(c.fieldBorder) !== FIELD_BORDER) out.push(`bord de champ ${t.fieldBorder}, attendu ${FIELD_BORDER}`);
+  if (t.inactiveBorder !== t.fieldBorder) out.push(`trait des champs au repos ${t.inactiveBorder}, attendu le bord de champ ${t.fieldBorder}`);
+  for (const k of ['field', 'card']) {
+    const r = contrast(c.fieldBorder, c[k]);
+    if (r < 3) out.push(`bord de champ sur ${k} : ${r.toFixed(2)}:1`);
+  }
+  for (const k of ['canvas', 'canvasDot']) if (c[k][0] !== c[k][1] || c[k][1] !== c[k][2]) out.push(`${k} ${t[k]} non neutre`);
+  for (const k of ['field', 'card', 'chrome', 'dock']) {
+    const a = contrast(c.accent, c[k]);
+    const f = contrast(c.activeBorder, c[k]);
+    if (a < 3) out.push(`accent sur ${k} : ${a.toFixed(2)}:1`);
+    if (f < 3) out.push(`anneau de focus (trait actif) sur ${k} : ${f.toFixed(2)}:1`);
+  }
+  if (c.accentBorder[3] !== 255 || hex6(c.accentBorder) !== hex6(c.accent)) out.push(`bord d'accent ${t.accentBorder}, attendu l'accent ${t.accent}, opaque`);
+  if (t.activeBorder !== t.accentBorder) out.push(`trait actif ${t.activeBorder}, attendu le bord d'accent ${t.accentBorder}`);
+  for (const k of ['card', 'chrome', 'field', 'dock', 'hover', 'pressed']) {
+    const r = contrast(c.accentText, c[k]);
+    if (r < 4.5) out.push(`texte d'accent sur ${k} : ${r.toFixed(2)}:1`);
+  }
+  if (t.selectionStroke !== t.accentText) out.push(`trait de sélection ${t.selectionStroke}, attendu le texte d'accent ${t.accentText}`);
+  const p = contrast(c.primaryText, c.primaryBg);
+  if (p < 4.5) out.push(`bouton principal : ${p.toFixed(2)}:1`);
+  return out;
+}
+
+// LUM-06 r2 (E2-c) : le thème et l'accent demandés par la coquille sont ceux du moteur.
+export function accentProblems(t, want) {
+  if (!t || typeof t !== 'object') return ['rapport de thème absent'];
+  const out = [];
+  if (t.kind !== want.kind) out.push(`thème ${t.kind}, attendu ${want.kind}`);
+  const bg = rgba(t.primaryBg);
+  const soft = rgba(t.accentSoft);
+  if (!bg || hex6(bg) !== want.accent.toUpperCase()) out.push(`bouton principal ${t.primaryBg}, attendu l'accent de la coquille ${want.accent}`);
+  if (!soft || hex6(soft) !== want.accent.toUpperCase()) out.push(`fond d'accent ${t.accentSoft}, attendu l'accent de la coquille ${want.accent}`);
+  return out;
+}
+
+// LUM-14 r2 et LUM-15 : ce que le moteur a pris et refusé des préférences de evora:init.
+export function prefsProblems(p) {
+  if (!p || typeof p !== 'object') return ['rapport des préférences absent'];
+  const out = [];
+  if (p.locationPolicy !== BENCH_PREFS['evora.locationPolicy']) out.push(`politique de localisation ${p.locationPolicy}, attendue ${BENCH_PREFS['evora.locationPolicy']}`);
+  if (p.canvasColor !== 'mediumGray') out.push(`entourage du canevas ${p.canvasColor}, attendu mediumGray`);
+  const drawn = rgba(p.canvasEffective);
+  if (!drawn || hex6(drawn) !== MEDIUM_GRAY) out.push(`entourage dessiné ${p.canvasEffective}, attendu ${MEDIUM_GRAY}`);
+  if (JSON.stringify(p.applied) !== JSON.stringify(['interface.canvasColor'])) out.push(`préférences prises ${JSON.stringify(p.applied)}, attendu ["interface.canvasColor"]`);
+  if (!Array.isArray(p.refused) || JSON.stringify([...p.refused].sort()) !== JSON.stringify(BENCH_REFUSED)) out.push(`préférences refusées ${JSON.stringify(p.refused)}, attendu ${JSON.stringify(BENCH_REFUSED)}`);
+  return out;
 }
 
 export class EhpBench {
@@ -830,6 +979,8 @@ export class EhpBench {
     // modifié (aucun evora:dirty false).
     this.ids.commands = [];
     this.windows = [];
+    // LUM-06 r2 : relevés diag.stats du thème, chacun avec le thème et l'accent attendus.
+    this.ids.themeChecks = [];
   }
 
   fail(tag, text) {
@@ -1008,6 +1159,13 @@ export class EhpBench {
     }
     const clean = await this.waitEngine((m) => m.type === 'evora:dirty' && m.payload.docRef === DOC_REF && m.payload.dirty === false, 10000);
     if (!clean) this.fail('dirty', 'evora:dirty {dirty: false} absent après l\'ouverture');
+    // LUM-06 r2, LUM-14 r2 et LUM-15 : le thème clair à l'accent de la coquille, et ce que le moteur a
+    // pris des préférences de evora:init (jugés par verify()).
+    const first = await this.themeCheck('init', { kind: 'evoraLight', accent: INIT_ACCENT }, true);
+    if (first && first.prefs) {
+      await this.sabotage('prefs-init', 'diag.stats fabriqué, préférences de evora:init ignorées',
+        `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(this.ids.prefsStats)}, payload: ${JSON.stringify({ ok: true, result: { ...first, prefs: { ...first.prefs, canvasColor: 'default', applied: [], refused: [] } } })} }`);
+    }
     await this.sabotage('envelope', 'evora:dirty à champ d\'enveloppe en trop', `{ v: 1, type: 'evora:dirty', payload: { dirty: false, docRef: ${JSON.stringify(DOC_REF)} }, extra: true }`);
     await this.sabotage('save-shape', 'evora:save aux octets en vue typée', `{ v: 1, type: 'evora:save', payload: { docRef: ${JSON.stringify(DOC_REF)}, name: 'evora-smoke.pcraft', saveAs: false, bytes: new Uint8Array(4) } }`);
     const dirty = await this.press('i', (m) => m.type === 'evora:dirty' && m.payload.docRef === DOC_REF && m.payload.dirty === true, 'evora:dirty true');
@@ -1066,6 +1224,7 @@ export class EhpBench {
     this.storageLog.push({ phase: 'session', ...st });
     if (st.theme !== 'evora') this.fail('theme', `thème enregistré après evora:theme dark : ${st.theme}, attendu evora (${STORAGE_NS.slice(0, 8)}…:${PREFS})`);
     if (st.language !== 'de') this.fail('lang', `langue enregistrée après evora:lang de : ${st.language}, attendue de (${STORAGE_NS.slice(0, 8)}…:${PREFS})`);
+    await this.themes();
     await this.savedAck();
     await this.exports();
     await this.openNew();
@@ -1077,6 +1236,118 @@ export class EhpBench {
     // En dernier : le sélecteur ouvre un onglet du moteur, qui devient le document actif.
     await this.pick();
     await this.storagePhases(st);
+  }
+
+  // LUM-06 r2 : un diag.stats relevé pour le thème (et, à l'init, pour les préférences de evora:init),
+  // jugé par verify() ; rend le résultat du moteur, ou null.
+  async themeCheck(step, want, withPrefs = false) {
+    const ack = await this.command('diag.stats');
+    const id = this.ids.lastCommand;
+    this.ids.themeChecks.push({ id, step, ...want });
+    if (withPrefs) this.ids.prefsStats = id;
+    return ack && ack.ok === true ? ack.result : null;
+  }
+
+  // LUM-06 r2 : le sombre en indigo (evora:theme de session()), puis le clair et le sombre en
+  // d'autres accents, enfin retour au sombre en indigo pour la suite du banc. Le témoin « banc »
+  // fabrique une réponse fausse à deux de ces relevés.
+  async themes() {
+    const dark = await this.themeCheck('sombre', { kind: 'evora', accent: EVORA_ACCENT });
+    const results = [];
+    for (const step of THEME_STEPS) {
+      const id = await this.send('evora:theme', `{ theme: ${JSON.stringify(step.theme)}, accent: ${JSON.stringify(step.accent)} }`);
+      const ack = await this.waitEngine((m) => m.type === 'evora:ack' && m.re === id && !this.injectedIds.includes(m.id), 15000);
+      if (!ack || ack.msg.payload.ok !== true) this.fail('theme-accent', `accusé de evora:theme ${step.theme} ${step.accent} absent ou négatif : ${JSON.stringify(ack && ack.msg)}`);
+      results.push(await this.themeCheck(`${step.theme} ${step.accent}`, { kind: step.kind, accent: step.accent }));
+    }
+    const back = await this.send('evora:theme', `{ theme: 'dark', accent: ${JSON.stringify(EVORA_ACCENT)} }`);
+    await this.waitEngine((m) => m.type === 'evora:ack' && m.re === back && !this.injectedIds.includes(m.id), 15000);
+    const sombre = this.ids.themeChecks.find((c) => c.step === 'sombre');
+    if (dark && dark.theme) {
+      await this.sabotage('theme-r2', 'diag.stats fabriqué, bord de champ de l\'E2 d\'origine (#3F3F46, 1,5:1)',
+        `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(sombre.id)}, payload: ${JSON.stringify({ ok: true, result: { ...dark, theme: { ...dark.theme, fieldBorder: '#3F3F46FF', inactiveBorder: '#3F3F46FF' } } })} }`);
+    }
+    const light = this.ids.themeChecks.find((c) => c.step === `${THEME_STEPS[0].theme} ${THEME_STEPS[0].accent}`);
+    if (results[0] && results[0].theme) {
+      await this.sabotage('theme-accent', 'diag.stats fabriqué, accent de la coquille ignoré (indigo)',
+        `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(light.id)}, payload: ${JSON.stringify({ ok: true, result: { ...results[0], theme: { ...results[0].theme, primaryBg: '#4F46E5FF', accentSoft: '#4F46E528' } } })} }`);
+    }
+  }
+
+  // LUM-14 r2 (scénario pont-politique, build de fumée) : la photo géolocalisée, deux calques à XMP
+  // propre (Layer::xmp et bloc shmd brut), puis un export par format par le service d'export du
+  // moteur ; les octets reçus sont jugés par verify() (politiqueVerdict). D'abord l'étalonnage du
+  // relevé : la photo d'origine doit s'y lire localisée, avec la marque et les droits.
+  async politique() {
+    this.politiqueMode = true;
+    this.ids.policyExports = {};
+    const cal = await this.evaluate(this.page, '__ehp.scanGeo()');
+    if (!cal || !cal.latitude || !cal.place || !cal.make || !cal.rights) {
+      this.fail('politique-temoin', `étalonnage : la photo ne se lit pas localisée, avec marque et droits : ${JSON.stringify(cal)}`);
+    }
+    const open = await this.send('evora:open', `{ docRef: ${JSON.stringify(POLICY_REF)}, name: 'evora-politique.png', bytes: __ehp.geo(${JSON.stringify(GPS_REF)}) }`);
+    const opened = await this.waitEngine(this.response('evora:ack', open), 30000);
+    if (!opened || opened.msg.payload.ok !== true) {
+      this.fail('politique-temoin', `ouverture de la photo : ${JSON.stringify(opened && opened.msg)}`);
+      return;
+    }
+    const layers = await this.send(SMOKE_LAYER_XMP, `{ xmp: ${JSON.stringify(LAYER_XMP_FIXTURE)} }`);
+    const added = await this.waitEngine(this.response('evora:ack', layers), 15000);
+    if (!added || added.msg.payload.ok !== true) {
+      this.fail('politique-temoin', `calques à XMP propre : ${JSON.stringify(added && added.msg)}`);
+      return;
+    }
+    for (const ext of POLICY_FORMATS) {
+      const mark = (await this.refresh()).log.length;
+      const id = await this.send(SMOKE_EXPORT, `{ ext: ${JSON.stringify(ext)} }`);
+      const out = await this.waitEngine((m) => m.type === 'evora:export', 60000, mark);
+      const done = await this.waitEngine(this.response('evora:ack', id), 15000, mark);
+      if (!out || !done || done.msg.payload.ok !== true) {
+        this.fail('politique-temoin', `export ${ext} : evora:export ${out ? out.msg.id : 'absent'}, accusé ${JSON.stringify(done && done.msg)}`);
+        continue;
+      }
+      this.ids.policyExports[ext] = out.msg.id;
+      await this.send('evora:ack', '{ ok: true }', { re: out.msg.id });
+    }
+  }
+
+  // LUM-14 r2 : verdict des exports du scénario pont-politique, sur les octets relevés par le harnais.
+  politiqueVerdict(msgs) {
+    for (const ext of POLICY_FORMATS) {
+      const id = (this.ids.policyExports || {})[ext];
+      if (!id) {
+        this.fail('politique-temoin', `export ${ext} non joué`);
+        continue;
+      }
+      const e = msgs.find((x) => x.msg && x.msg.id === id);
+      const sc = e && e.scan;
+      const where = `evora:export id ${id} (${ext}, politique ${POLICY})`;
+      if (!sc || typeof sc !== 'object') {
+        this.fail('politique-temoin', `${where} : octets illisibles (${JSON.stringify(sc)})`);
+        continue;
+      }
+      this.log(`[politique] ${POLICY} ${ext} : ${JSON.stringify(sc)}`);
+      const strict = POLICY_STRICT.includes(ext);
+      if (POLICY !== 'all') {
+        if (sc.latitude || sc.gpsName || sc.place) this.fail('politique-lieu', `${where} : localisation présente (latitude ${sc.latitude}, nom GPS ${sc.gpsName}, lieu ${sc.place})`);
+        if (sc.gps16 || sc.place16) this.fail('politique-calque', `${where} : localisation dans un XMP de calque (GPS ${sc.gps16}, lieu ${sc.place16})`);
+      }
+      if (POLICY === 'rights') {
+        if (sc.make) this.fail('politique-droits', `${where} : marque de l'appareil (EXIF) présente sous « droits seuls »`);
+        if (sc.rights16) this.fail('politique-droits', `${where} : XMP de calque présent sous « droits seuls »`);
+        if (strict && !sc.rights) this.fail('politique-temoin', `${where} : droits absents : la recette ne prouve rien`);
+      }
+      if (POLICY === 'none' && strict) {
+        if (!sc.make || !sc.rights) this.fail('politique-temoin', `${where} : marque (${sc.make}) ou droits (${sc.rights}) absents : la recette ne prouve rien`);
+        if (ext === 'psd' && !sc.rights16) this.fail('politique-temoin', `${where} : XMP de calque absent (droits en UTF-16) : la recette ne prouve rien`);
+      }
+      if (POLICY === 'all' && strict) {
+        if (!(sc.latitude && sc.place && sc.make && sc.rights)) {
+          this.fail('politique-toutes', `${where} : sous « toutes », latitude ${sc.latitude}, lieu ${sc.place}, marque ${sc.make}, droits ${sc.rights} (attendus présents)`);
+        }
+        if (ext === 'psd' && !(sc.gps16 && sc.place16)) this.fail('politique-toutes', `${where} : XMP de calque sans sa localisation sous « toutes »`);
+      }
+    }
   }
 
   // LUM-09 : diag.menus (relevé par commands()) liste les articles masqués, jugés par verify() ;
@@ -1948,6 +2219,29 @@ export class EhpBench {
     if (this.ids.gpsExports) {
       for (const f of GEO_FIXTURES) if (!this.ids.gpsExports[f.ref]) this.fail('export-no-gps', `export de ${f.name} non joué`);
     } else if (this.ids.menus) this.fail('export-no-gps', 'exports des photos géolocalisées non joués');
+    // LUM-06 r2 : chaque réponse aux relevés du thème est jugée ; une réponse fabriquée par le témoin
+    // « banc » rougit à son détecteur, citée par son id.
+    for (const c of this.ids.themeChecks || []) {
+      for (const e of answered(c.id)) {
+        const r = ((e.msg.payload || {}).result) || {};
+        const r2 = themeProblems(r.theme);
+        if (r2.length) this.fail('theme-r2', `diag.stats id ${e.msg.id} (${c.step}) : ${r2.join(' ; ')}`);
+        const ac = accentProblems(r.theme, c);
+        if (ac.length) this.fail('theme-accent', `diag.stats id ${e.msg.id} (${c.step}) : ${ac.join(' ; ')}`);
+      }
+    }
+    // LUM-14 r2 et LUM-15 : les préférences de evora:init, relevées après l'ouverture.
+    if (this.ids.prefsStats) {
+      for (const e of answered(this.ids.prefsStats)) {
+        const why = prefsProblems((((e.msg.payload || {}).result) || {}).prefs);
+        if (why.length) this.fail('prefs-init', `diag.stats id ${e.msg.id} (init) : ${why.join(' ; ')}`);
+      }
+    }
+    if (this.ids.menus) {
+      if (this.ids.themeChecks.length !== 2 + THEME_STEPS.length) this.fail('theme-r2', `relevés du thème joués : ${this.ids.themeChecks.length}, attendus ${2 + THEME_STEPS.length}`);
+      if (!this.ids.prefsStats) this.fail('prefs-init', 'relevé des préférences de evora:init non joué');
+    }
+    if (this.politiqueMode) this.politiqueVerdict(msgs);
     const announced = this.readyCaps;
     const extra = announced.filter((x) => !EXERCISED.includes(x));
     if (extra.length) this.fail('caps', `capacités annoncées non exercées par ce scénario : ${extra.join(', ')}`);

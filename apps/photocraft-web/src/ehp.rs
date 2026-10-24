@@ -179,7 +179,8 @@ pub enum HostEvent {
 
 /// Smoke build only (patch LUM-14 r3): `evora:smoke-placed {png, jpeg, linked, other, nestedXmp}`,
 /// the files smart objects place (`linked`: the file of an imported PSD's smart object) and the
-/// XMP packet of the `.pcraft` document a smart object places.
+/// XMP packet of the `.pcraft` document a smart object places; patch LUM-14 r4: `turnedJpeg` and
+/// `turnedPng`, two photos stored on their side that their EXIF turns upright.
 #[cfg(feature = "evora-smoke")]
 pub struct SmokeFiles {
     pub png: Vec<u8>,
@@ -187,6 +188,8 @@ pub struct SmokeFiles {
     pub linked: Vec<u8>,
     pub other: Vec<u8>,
     pub nested_xmp: String,
+    pub turned_jpeg: Vec<u8>,
+    pub turned_png: Vec<u8>,
 }
 
 /// Smoke build only (patch LUM-14 r3): `evora:smoke-shmd {clean, second, twice, raw, item,
@@ -838,10 +841,17 @@ impl Bridge {
                 }
             }
             "evora:smoke-placed" => {
-                if let (Some(png), Some(jpeg), Some(linked), Some(other), Some(nested_xmp)) =
-                    (bytes("png"), bytes("jpeg"), bytes("linked"), bytes("other"), text("nestedXmp"))
-                {
-                    self.push(HostEvent::SmokePlaced { id: id.to_owned(), files: SmokeFiles { png, jpeg, linked, other, nested_xmp } });
+                if let (Some(png), Some(jpeg), Some(linked), Some(other), Some(nested_xmp), Some(turned_jpeg), Some(turned_png)) = (
+                    bytes("png"),
+                    bytes("jpeg"),
+                    bytes("linked"),
+                    bytes("other"),
+                    text("nestedXmp"),
+                    bytes("turnedJpeg"),
+                    bytes("turnedPng"),
+                ) {
+                    let files = SmokeFiles { png, jpeg, linked, other, nested_xmp, turned_jpeg, turned_png };
+                    self.push(HostEvent::SmokePlaced { id: id.to_owned(), files });
                 }
             }
             _ => {

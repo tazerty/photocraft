@@ -489,7 +489,8 @@ jobs:
           # exporter la photo géolocalisée en cinq formats, sous chacune des trois politiques de
           # localisation ; LUM-14 r3 : avec des objets dynamiques qui placent des fichiers
           # géolocalisés, un bloc global que le moteur ne lit pas, une note et des blocs shmd qui
-          # tiennent plus que l'export ne garde. Ce build n'est jamais empaqueté : chacun de ses marqueurs doit être présent
+          # tiennent plus que l'export ne garde ; LUM-14 r4 : avec deux photos stockées couchées que leur EXIF
+          # tourne, qui doivent en sortir debout et à leur résolution. Ce build n'est jamais empaqueté : chacun de ses marqueurs doit être présent
           # dans son .wasm (sinon la recette ne prouve rien) et absent du .wasm servi. Même profil que
           # le build servi (cache cargo partagé), sans wasm-opt.
           smoke_dir="$RUNNER_TEMP/evora-web-smoke"

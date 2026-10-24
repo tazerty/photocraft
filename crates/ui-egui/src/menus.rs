@@ -28,6 +28,24 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = photocraft_engin
 /// The id ends in the document's index, which is its tab's position.
 pub(crate) const DOCUMENT_ITEM: &str = "window.document.";
 
+/// Evora build (patch LUM-09): the menu items a host build hides, set once by the web shell under
+/// the Evora host bridge (`apps/photocraft-web`, `host_menus`): features reachable there that do
+/// nothing in the browser, or that the host leaves out of its first version. They leave the
+/// menus, the palette and [`menu_items`], and [`invoke`] ignores them, shortcuts included, without
+/// a message in the canvas. Empty in every other build.
+static HOST_HIDDEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Evora build (patch LUM-09): hide `ids` from the menus and from [`invoke`] (see `HOST_HIDDEN`).
+pub fn set_host_hidden(ids: &[&str]) {
+    let mut hidden = HOST_HIDDEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    *hidden = ids.iter().map(|id| (*id).to_string()).collect();
+}
+
+/// Evora build (patch LUM-09): is `id` hidden by the host build?
+pub fn is_host_hidden(id: &str) -> bool {
+    HOST_HIDDEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().any(|h| h == id)
+}
+
 /// Photoshop's Window › <panel> ids for the panels the shell already has, as `window.toggle.*`.
 pub(crate) fn panel_alias(id: &str) -> Option<&'static str> {
     Some(match id.strip_prefix("window.panel.")? {
@@ -68,6 +86,11 @@ fn workspace_name(id: &str) -> Option<&'static str> {
 
 /// Run a command id from any source (menu, shortcut, palette, automation).
 pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
+    // Evora build (patch LUM-09): a feature the host build hides does nothing, whatever asks for it.
+    if is_host_hidden(id) {
+        log::info!("{id}: hidden in this build");
+        return Ok(Value::Null);
+    }
     if app.automation_input
         && let Some(authorize) = app.services.automation_command.as_ref()
     {
@@ -86,6 +109,10 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Va
 
 /// [`invoke`] without the unsaved-changes prompt, for once the user has already answered it.
 pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
+    // Evora build (patch LUM-09): as in [`invoke`].
+    if is_host_hidden(id) {
+        return Ok(Value::Null);
+    }
     if let Some(tool) = crate::tool_shortcuts::tool(id) {
         crate::tool_memory::select(app, tool);
         return Ok(json!({"tool": tool}));
@@ -914,7 +941,21 @@ const PLACE_AFTER: &[(&str, &str)] = &[
     ("filter.other.colorToAlpha", "filter.other.offset"),
 ];
 
+/// The menu tree of [`menu_items_unmasked`], without what the host build hides (Evora build,
+/// patch LUM-09); a separator stays only in a menu that still has an item.
 pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
+    let mut items = menu_items_unmasked(app);
+    let hidden = HOST_HIDDEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+    if !hidden.is_empty() {
+        items.retain(|i| !hidden.contains(&i.id));
+        let menus: Vec<Vec<String>> = items.iter().filter(|i| i.id != "---").map(|i| i.path.clone()).collect();
+        items.retain(|i| i.id != "---" || menus.iter().any(|p| p.starts_with(&i.path)));
+    }
+    items
+}
+
+/// The whole menu tree, before the host build's masking (patch LUM-09 reports what it hides).
+pub fn menu_items_unmasked(app: &PhotocraftApp) -> Vec<MenuItem> {
     // 1) Photoshop's full menu tree, in Photoshop order; live where we implement the command.
     let known = is_live;
     let mut items: Vec<MenuItem> = crate::menu_catalog::CATALOG

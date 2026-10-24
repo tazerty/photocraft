@@ -3273,9 +3273,9 @@ curves	Smooth	Lisser
 	Bicubic Smoother	Bicubique plus lisse
 	Bicubic Sharper	Bicubique plus net
 	Pasting from other apps is unavailable	Le collage depuis d’autres applications est indisponible
-	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft ne peut pas accéder au presse-papiers du système dans cette session. Sous Wayland, le bac à sable Flatpak masque le protocole par lequel les images des autres applications sont lues.
-	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Pour coller depuis d’autres applications, lancez PhotoCraft sous XWayland : `{command}`
-	Nothing to paste: PhotoCraft can't read the system clipboard here	Rien à coller : PhotoCraft ne peut pas lire ici le presse-papiers du système
+	Lumbra can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	Lumbra ne peut pas accéder au presse-papiers du système dans cette session. Sous Wayland, le bac à sable Flatpak masque le protocole par lequel les images des autres applications sont lues.
+	To paste from other apps, start Lumbra under XWayland: `{command}`	Pour coller depuis d’autres applications, lancez Lumbra sous XWayland : `{command}`
+	Nothing to paste: Lumbra can't read the system clipboard here	Rien à coller : Lumbra ne peut pas lire ici le presse-papiers du système
 	Delete this set	Supprimer ce jeu
 	New Set…	Nouveau jeu…
 	Lumbra Defaults	Valeurs par défaut de Lumbra
@@ -3805,8 +3805,6 @@ curves	Smooth	Lisser
 	Iris Blur	Flou d'iris
 	Ivy	Lierre
 	Jag	Dentelé
-	Join the ArtCraft Discord	Rejoindre le Discord d'ArtCraft
-	Join the ArtCraft Discord ({url})	Rejoindre le Discord d'ArtCraft ({url})
 	Kernel	Noyau
 	Kerning: Metrics, Optical or a value in 1/1000 em (Alt+←/→ at the caret)	Crénage : Métriques, Optique ou une valeur en 1/1000 em (Alt+←/→ au point d'insertion)
 	Keyboard	Clavier
@@ -3985,7 +3983,7 @@ curves	Smooth	Lisser
 	Percentage	Pourcentage
 	Perimeter	Périmètre
 	Permission denied	Autorisation refusée
-	PhotoCraft keeps retrying; until a save succeeds, preference changes are lost when it closes.	PhotoCraft continue de réessayer ; tant qu'un enregistrement n'a pas abouti, les modifications des préférences seront perdues à la fermeture.
+	Lumbra keeps retrying; until a save succeeds, preference changes are lost when it closes.	Lumbra continue de réessayer ; tant qu'un enregistrement n'a pas abouti, les modifications des préférences seront perdues à la fermeture.
 	Photomerge	Photomerge
 	Picture Frame	Cadre d'image
 	Pinch	Pincement
@@ -4096,7 +4094,7 @@ curves	Smooth	Lisser
 	Save a Copy	Enregistrer une copie
 	Save before closing?	Enregistrer avant de fermer ?
 	Save for Web (Legacy)	Enregistrer pour le Web (ancien)
-	Save your work and restart PhotoCraft to retry GPU acceleration. CPU rendering remains active for this session.	Enregistrez votre travail et redémarrez PhotoCraft pour réessayer l'accélération GPU. Le rendu CPU reste actif pour cette session.
+	Save your work and restart Lumbra to retry GPU acceleration. CPU rendering remains active for this session.	Enregistrez votre travail et redémarrez Lumbra pour réessayer l'accélération GPU. Le rendu CPU reste actif pour cette session.
 	Saved a copy as {path}	Copie enregistrée sous {path}
 	Saved {path}; image assets: {n} in {dir}	{path} enregistré ; ressources d'image : {n} dans {dir}
 	Saving…	Enregistrement…

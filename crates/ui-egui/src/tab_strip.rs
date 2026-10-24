@@ -72,7 +72,8 @@ pub fn overflow_button(ui: &mut Ui, id: egui::Id, r: Rect, tip: &str, labels: &[
         ui.set_min_width(140.0);
         for &i in overflow {
             let Some(name) = labels.get(i) else { continue };
-            let text = if checked.is_some() { format!("{} {name}", if checked == Some(i) { "✔" } else { "  " }) } else { (*name).to_owned() };
+            // Evora build (patch E10): U+2713, drawn by Inter, rather than the emoji-only U+2714.
+            let text = if checked.is_some() { format!("{} {name}", if checked == Some(i) { "✓" } else { "  " }) } else { (*name).to_owned() };
             if ui.button(text).clicked() {
                 *picked = Some(i);
                 ui.close();

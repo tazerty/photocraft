@@ -4304,9 +4304,9 @@ shape	Appearance	Izgled
 	Bicubic Smoother	Bikubično glađe
 	Bicubic Sharper	Bikubično oštrije
 	Pasting from other apps is unavailable	Lepljenje iz drugih aplikacija nije dostupno
-	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft u ovoj sesiji ne može da pristupi sistemskoj ostavi. Na Wayland-u, Flatpak sandbox skriva protokol preko kog se čitaju slike iz drugih aplikacija.
-	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Da biste lepili iz drugih aplikacija, pokrenite PhotoCraft pod XWayland-om: `{command}`
-	Nothing to paste: PhotoCraft can't read the system clipboard here	Nema šta da se nalepi: PhotoCraft ovde ne može da čita sistemsku ostavu
+	Lumbra can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	Lumbra u ovoj sesiji ne može da pristupi sistemskoj ostavi. Na Wayland-u, Flatpak sandbox skriva protokol preko kog se čitaju slike iz drugih aplikacija.
+	To paste from other apps, start Lumbra under XWayland: `{command}`	Da biste lepili iz drugih aplikacija, pokrenite program Lumbra pod XWayland-om: `{command}`
+	Nothing to paste: Lumbra can't read the system clipboard here	Nema šta da se nalepi: Lumbra ovde ne može da čita sistemsku ostavu
 	Delete this set	Obriši ovaj skup
 	New Set…	Novi skup…
 	Lumbra Defaults	Podrazumevano za program Lumbra

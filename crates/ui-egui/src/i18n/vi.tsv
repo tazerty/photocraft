@@ -3728,9 +3728,9 @@ curves	Smooth	Làm mượt
 	Bicubic Smoother	Bicubic mượt hơn
 	Bicubic Sharper	Bicubic sắc hơn
 	Pasting from other apps is unavailable	Không thể dán từ ứng dụng khác
-	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft không truy cập được bộ nhớ tạm của hệ thống trong phiên này. Trên Wayland, sandbox của Flatpak ẩn giao thức dùng để đọc hình ảnh từ ứng dụng khác.
-	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Để dán từ ứng dụng khác, hãy khởi động PhotoCraft dưới XWayland: `{command}`
-	Nothing to paste: PhotoCraft can't read the system clipboard here	Không có gì để dán: PhotoCraft không thể đọc bộ nhớ tạm của hệ thống ở đây
+	Lumbra can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	Lumbra không truy cập được bộ nhớ tạm của hệ thống trong phiên này. Trên Wayland, sandbox của Flatpak ẩn giao thức dùng để đọc hình ảnh từ ứng dụng khác.
+	To paste from other apps, start Lumbra under XWayland: `{command}`	Để dán từ ứng dụng khác, hãy khởi động Lumbra dưới XWayland: `{command}`
+	Nothing to paste: Lumbra can't read the system clipboard here	Không có gì để dán: Lumbra không thể đọc bộ nhớ tạm của hệ thống ở đây
 	Delete this set	Xóa bộ này
 	New Set…	Bộ mới…
 	Lumbra Defaults	Mặc định của Lumbra

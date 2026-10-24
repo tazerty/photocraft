@@ -4055,9 +4055,9 @@ layerLabel	No Color	Sem cor
 	Bicubic Smoother	Bicúbica mais suave
 	Bicubic Sharper	Bicúbica mais nítida
 	Pasting from other apps is unavailable	Colar de outros aplicativos não está disponível
-	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	O PhotoCraft não consegue acessar a área de transferência do sistema nesta sessão. No Wayland, a sandbox do Flatpak oculta o protocolo pelo qual as imagens de outros aplicativos são lidas.
-	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Para colar de outros aplicativos, execute o PhotoCraft no XWayland: `{command}`
-	Nothing to paste: PhotoCraft can't read the system clipboard here	Nada para colar: o PhotoCraft não consegue ler a área de transferência do sistema aqui
+	Lumbra can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	O Lumbra não consegue acessar a área de transferência do sistema nesta sessão. No Wayland, a sandbox do Flatpak oculta o protocolo pelo qual as imagens de outros aplicativos são lidas.
+	To paste from other apps, start Lumbra under XWayland: `{command}`	Para colar de outros aplicativos, execute o Lumbra no XWayland: `{command}`
+	Nothing to paste: Lumbra can't read the system clipboard here	Nada para colar: o Lumbra não consegue ler a área de transferência do sistema aqui
 	Delete this set	Excluir este conjunto
 	New Set…	Novo conjunto…
 	Lumbra Defaults	Padrões do Lumbra
@@ -4224,7 +4224,7 @@ layerLabel	No Color	Sem cor
 	This session: {reason}	Nesta sessão: {reason}
 	Platform: {os} {arch}	Plataforma: {os} {arch}
 	GPU retry scheduled	Nova tentativa da GPU agendada
-	Save your work and restart PhotoCraft to retry GPU acceleration. CPU rendering remains active for this session.	Salve seu trabalho e reinicie o PhotoCraft para tentar a aceleração por GPU novamente. A renderização pela CPU continua ativa nesta sessão.
+	Save your work and restart Lumbra to retry GPU acceleration. CPU rendering remains active for this session.	Salve seu trabalho e reinicie o Lumbra para tentar a aceleração por GPU novamente. A renderização pela CPU continua ativa nesta sessão.
 	GPU device was lost; using the CPU renderer.	O dispositivo da GPU foi perdido; usando o renderizador da CPU.
 	GPU error; using the CPU renderer.	Erro da GPU; usando o renderizador da CPU.
 	Monitor profile: {profile}	Perfil do monitor: {profile}
@@ -4245,7 +4245,7 @@ layerLabel	No Color	Sem cor
 	Preferences were reset: {error}	As preferências foram redefinidas: {error}
 	Couldn't save preferences: {error}. Retrying…	Não foi possível salvar as preferências: {error}. Tentando novamente…
 	Preferences can't be saved	Não é possível salvar as preferências
-	PhotoCraft keeps retrying; until a save succeeds, preference changes are lost when it closes.	O PhotoCraft continua tentando; até que um salvamento dê certo, as alterações nas preferências serão perdidas ao fechar.
+	Lumbra keeps retrying; until a save succeeds, preference changes are lost when it closes.	O Lumbra continua tentando; até que um salvamento dê certo, as alterações nas preferências serão perdidas ao fechar.
 	Invalid panel layout; restored the default dock	Layout de painéis inválido; a disposição padrão dos painéis foi restaurada
 	Recovered {name}	Recuperado: {name}
 	Autosave failed: {error}	Falha ao salvar automaticamente: {error}

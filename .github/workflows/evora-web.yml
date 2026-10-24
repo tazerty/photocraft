@@ -57,7 +57,8 @@ env:
   # wasm-opt : version par défaut de Trunk 0.21.14 (celle que l'amont obtient sans réglage).
   BINARYEN_VERSION: version_123
   BINARYEN_SHA256: e959f2170af4c20c552e9de3a0253704d6a9d2766e8fdb88e4d6ac4bae9388fe
-  # Plafond de packaging/web/package.sh (24 MiB), affiché pour information seulement.
+  # Plafond par fichier de packaging/web/package.sh (24 MiB) : repli de la porte de taille (LUM-08)
+  # tant que le budget Evora (variable de dépôt EVORA_WASM_BUDGET_BYTES, D-15) n'est pas posé.
   UPSTREAM_WASM_LIMIT_BYTES: "25165824"
   # Portes d'audit (EmbarkStudios, binaires musl officiels).
   CARGO_DENY_VERSION: 0.20.2
@@ -382,6 +383,10 @@ jobs:
       - name: Portes Evora (marques, hébergement, licences, émojis, termes, CSP, taille)
         id: gates
         continue-on-error: true
+        env:
+          # LUM-08 : budget de taille d'un .wasm, variable à arbitrer (D-15) ; vide : repli sur le
+          # plafond de l'amont (UPSTREAM_WASM_LIMIT_BYTES).
+          EVORA_WASM_BUDGET_BYTES: ${{ vars.EVORA_WASM_BUDGET_BYTES }}
         run: python3 -I evora/ci/gates.py "$EVORA_PKG_DIR" "$RUNNER_TEMP/evora-gates.json"
 
       - name: Test de fumée (Chrome sans interface, origine différente)

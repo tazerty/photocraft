@@ -112,6 +112,12 @@
 // (politique-notes) ; les objets dynamiques gardent leur fichier nettoyé (noms des fichiers rangés)
 // sauf celui de l'autre format (devenu calque de pixels), et le layerTime reste (témoins intacts) ;
 // sous « all », tout est là. Les fichiers placés sont d'abord relus (étalonnage).
+// LUM-14 r4 (vérification de la correction 1) : deux objets dynamiques de plus placent des photos
+// stockées couchées que leur EXIF tourne (Orientation 6, comme un téléphone les écrit) : un JPEG à
+// 300 ppi par son EXIF (son en-tête JFIF dit 72) et un PNG sans pHYs à 200 ppi par son XMP (son EXIF
+// dit 100). Jugé dans le TIFF à calques et le PSD, sous les trois politiques, sur la source de leur
+// bloc SoLd (taille et résolution, que l'exporteur mesure sur le fichier qu'il incorpore) : chacune
+// sort debout (politique-debout), à sa résolution (politique-resolution).
 //
 // Témoins sabordés (SMOKE_SABOTAGE) : le même banc, sur un défaut fabriqué ; un témoin est VALIDE
 // (code 0) seulement si chaque défaut rougit à SON détecteur, à SA place, et si tout le reste du banc
@@ -213,6 +219,12 @@ const PLACED_MARKERS = { png: 'EvoraGeoPng', jpeg: 'EvoraGeoJpeg', linked: 'Evor
 // que l'export ne sait pas nettoyer fait du calque un calque de pixels sous « none » et « rights ».
 const PLACED_FILES = ['evora-place.png', 'evora-place.jpg', 'evora-place-linked.png', 'evora-place.psb'];
 const PLACED_OTHER = 'evora-place.bin';
+// LUM-14 r4 : les photos tournées (fichiers placés turnedJpeg et turnedPng), leur taille stockée
+// (largeur, hauteur) et la résolution que le moteur y lit ; debout, largeur et hauteur s'échangent.
+const TURNED = [
+  { key: 'turnedJpeg', name: 'evora-tourne.jpg', stored: [32, 16], ppi: 300 },
+  { key: 'turnedPng', name: 'evora-tourne.png', stored: [32, 8], ppi: 200 },
+];
 // Le contenu du bloc global que le moteur ne lit pas, l'auteur de la note, le repère des blocs shmd
 // (suivi de A à D selon le bloc) et la clé layerTime que l'export garde (valeurs de host_docs.rs).
 const GLOBAL_MARKER = 'EvoraGeoGlobal';
@@ -410,8 +422,8 @@ export function muteProblems({ started, last, storage, parentMessages, served, w
 }
 
 // Une image PNG RGBA de 32 × 32 (indigo), écrite ici : aucun fichier binaire dans le dépôt. `extra` :
-// blocs ([type, données]) placés avant les pixels (eXIf, iTXt).
-function pngFile(extra = []) {
+// blocs ([type, données]) placés avant les pixels (eXIf, iTXt) ; LUM-14 r4 : `width` et `height`.
+function pngFile(extra = [], width = 32, height = 32) {
   const crcTable = Array.from({ length: 256 }, (_, n) => {
     let c = n;
     for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
@@ -430,15 +442,14 @@ function pngFile(extra = []) {
     sum.writeUInt32BE(crc(body));
     return Buffer.concat([len, body, sum]);
   };
-  const size = 32;
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
   ihdr.set([8, 6, 0, 0, 0], 8);
   const rows = [];
-  for (let y = 0; y < size; y++) {
+  for (let y = 0; y < height; y++) {
     rows.push(Buffer.from([0]));
-    for (let x = 0; x < size; x++) rows.push(Buffer.from([0x4f, 0x46, 0xe5, 0xff]));
+    for (let x = 0; x < width; x++) rows.push(Buffer.from([0x4f, 0x46, 0xe5, 0xff]));
   }
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr),
     ...extra.map(([type, data]) => chunk(type, data)),
@@ -611,14 +622,65 @@ function placedJpeg() {
     jpegSegment(0xfe, Buffer.from(PLACED_MARKERS.jpeg, 'latin1')),
     base.subarray(app0End)]);
 }
+// LUM-14 r4 : l'EXIF d'une photo tournée, dans l'ordre d'octets demandé : IFD0 avec Orientation 6,
+// XResolution et YResolution (ppi/1) et ResolutionUnit 2 (pouce), rien d'autre.
+function turnedExif(le, ppi) {
+  const out = Buffer.alloc(78);
+  const u16 = (v, at) => (le ? out.writeUInt16LE(v, at) : out.writeUInt16BE(v, at));
+  const u32 = (v, at) => (le ? out.writeUInt32LE(v, at) : out.writeUInt32BE(v, at));
+  out.write(le ? 'II' : 'MM', 0, 'latin1');
+  u16(42, 2);
+  u32(8, 4);
+  // IFD0 à 8 : quatre entrées, puis le prochain répertoire (aucun) ; fin à 62 ; résolutions à 62 et 70.
+  u16(4, 8);
+  [[0x0112, 3, 6], [0x011a, 5, 62], [0x011b, 5, 70], [0x0128, 3, 2]].forEach(([tag, type, value], k) => {
+    const e = 10 + 12 * k;
+    u16(tag, e); u16(type, e + 2); u32(1, e + 4);
+    if (type === 3) u16(value, e + 8);
+    else u32(value, e + 8);
+  });
+  u32(0, 58);
+  for (const at of [62, 70]) { u32(ppi, at); u32(1, at + 4); }
+  return out;
+}
+// LUM-14 r4 : une photo JPEG stockée couchée, 32 × 16 (ambre), JFIF à 72 ppi (unité 1), écrite par
+// Pillow pour ce banc (638 octets, en base64) ; après l'en-tête JFIF, son EXIF (grand-boutiste) la
+// tourne et la dit à 300 ppi, que le moteur lit avant le JFIF : debout, 16 × 32 à 300 ppi.
+const TURNED_JPEG_BASE = '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAAQACADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDz+iiiv5yP6TCiiigD/9k=';
+function turnedJpeg() {
+  const base = Buffer.from(TURNED_JPEG_BASE, 'base64');
+  const app0End = 4 + base.readUInt16BE(4);
+  return Buffer.concat([base.subarray(0, app0End),
+    jpegSegment(0xe1, Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), turnedExif(false, 300)])), base.subarray(app0End)]);
+}
+// LUM-14 r4 : un PNG stocké couché, 32 × 8, sans pHYs : son EXIF (petit-boutiste) le tourne et le dit
+// à 100 ppi ; son XMP, que le moteur lit avant l'EXIF, le dit à 200 ppi : debout, 8 × 32 à 200 ppi.
+const TURNED_XMP = '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+  + '<rdf:Description rdf:about="" xmlns:tiff="http://ns.adobe.com/tiff/1.0/" tiff:XResolution="200/1" tiff:YResolution="200/1"'
+  + ' tiff:ResolutionUnit="2"/></rdf:RDF></x:xmpmeta>';
+function turnedPng() {
+  return pngFile([['eXIf', turnedExif(true, 100)], ['iTXt', itxt('XML:com.adobe.xmp', TURNED_XMP)]], 32, 8);
+}
+// LUM-14 r4 : la taille stockée d'un PNG (IHDR) ou d'un JPEG (premier en-tête de trame), ou null.
+function storedSize(b) {
+  if (b[0] === 0x89) return [b.readUInt32BE(16), b.readUInt32BE(20)];
+  for (let at = 2; at + 9 <= b.length; at += 2 + b.readUInt16BE(at + 2)) {
+    if (b[at] !== 0xff) return null;
+    if (b[at + 1] === 0xc0) return [b.readUInt16BE(at + 7), b.readUInt16BE(at + 5)];
+  }
+  return null;
+}
 // LUM-14 r3 : les fichiers que placent les objets dynamiques (evora:smoke-placed) : PNG et JPEG
-// géolocalisés, le PNG d'un PSD importé, un fichier d'un autre format.
+// géolocalisés, le PNG d'un PSD importé, un fichier d'un autre format ; LUM-14 r4 : les photos
+// tournées.
 function placedFiles() {
   return {
     png: pngFile([['eXIf', exifFixture()], ['iTXt', itxt('XML:com.adobe.xmp', placeXmp(PLACED_MARKERS.png))], textChunk('Comment', PLACED_MARKERS.png)]),
     jpeg: placedJpeg(),
     linked: pngFile([['eXIf', exifFixture()], ['iTXt', itxt('XML:com.adobe.xmp', placeXmp(PLACED_MARKERS.linked))]]),
     other: Buffer.from(`EVORA-SMOKE ${PLACED_MARKERS.other}\n`, 'latin1'),
+    turnedJpeg: turnedJpeg(),
+    turnedPng: turnedPng(),
   };
 }
 
@@ -876,6 +938,37 @@ export function harnessJs() {
   // LUM-14 r2 : ce que les octets d'un export contiennent, quel que soit le format : la latitude
   // GPS (24 octets, dans les deux ordres), un nom de propriété GPS, le lieu, la marque de l'appareil
   // (chaîne EXIF terminée par NUL), les droits ; puis la même chose en UTF-16 (XMP de calque du PSD).
+  // LUM-14 r4 : la source de chaque objet dynamique, relevée dans ses blocs SoLd : la taille (« Sz  »,
+  // largeur et hauteur) puis la résolution (« Rslt »), dans l'ordre d'octets du PSD ou dans celui,
+  // petit-boutiste (clés à l'envers), du TIFF à calques.
+  const placedSources = (b, t) => {
+    const out = [];
+    const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    for (const le of [false, true]) {
+      const key = (s) => (le ? s.split('').reverse().join('') : s);
+      const pat = String.fromCharCode(0, 0, 0, 0) + key('Sz  ') + key('Objc');
+      for (let at = t.indexOf(pat); at >= 0; at = t.indexOf(pat, at + 1)) {
+        let p = at + pat.length;
+        const u32 = () => { const v = dv.getUint32(p, le); p += 4; return v; };
+        const four = () => { const s = key(t.slice(p, p + 4)); p += 4; return s; };
+        const id = () => { const n = u32(); if (!n) return four(); p += n; return t.slice(p - n, p); };
+        const f64 = () => { const v = dv.getFloat64(p, le); p += 8; return v; };
+        try {
+          p += 2 * u32();
+          id();
+          const size = {};
+          for (let i = 0, n = u32(); i < n && i < 8; i++) {
+            const k = id();
+            if (four() !== 'doub') break;
+            size[k] = f64();
+          }
+          const ppi = id() === 'Rslt' && four() === 'UntF' && four() === '#Rsl' ? f64() : null;
+          out.push([size.Wdth, size.Hght, ppi]);
+        } catch (err) { out.push(['illisible']); }
+      }
+    }
+    return out;
+  };
   const scanMeta = (buf) => {
     const b = new Uint8Array(buf);
     const t = latin1(b);
@@ -891,7 +984,9 @@ export function harnessJs() {
       global: t.includes(${JSON.stringify(GLOBAL_MARKER)}), note: t.includes(${JSON.stringify(NOTE_MARKER)}),
       shmd: ${JSON.stringify(SHMD_KEYS)}.filter((k) => t.includes(${JSON.stringify(SHMD_MARKER)} + k) || has16(${JSON.stringify(SHMD_MARKER)} + k)),
       files: ${JSON.stringify(PLACED_FILES)}.filter(has16), other: has16(${JSON.stringify(PLACED_OTHER)}),
-      layerTime: t.includes(${JSON.stringify(LAYER_TIME_KEY)}) };
+      layerTime: t.includes(${JSON.stringify(LAYER_TIME_KEY)}),
+      // LUM-14 r4 : les sources des objets dynamiques (largeur, hauteur, résolution).
+      sources: placedSources(b, t) };
   };
   const log = [];
   const sent = [];
@@ -1412,7 +1507,16 @@ export class EhpBench {
     if (!placedScan.other || !placedScan.other.placed.includes(PLACED_MARKERS.other)) {
       this.fail('politique-temoin', `étalonnage : le fichier placé other sans son repère : ${JSON.stringify(placedScan.other)}`);
     }
+    // LUM-14 r4 : étalonnage des photos tournées : stockées couchées.
+    const turnedFiles = placedFiles();
+    for (const t of TURNED) {
+      const stored = storedSize(turnedFiles[t.key]);
+      if (!stored || stored[0] !== t.stored[0] || stored[1] !== t.stored[1]) {
+        this.fail('politique-temoin', `étalonnage : ${t.name} stockée ${JSON.stringify(stored)}, attendue ${t.stored.join(' × ')} : la recette ne prouve rien`);
+      }
+    }
     const files = '{ png: __ehp.placedFile("png"), jpeg: __ehp.placedFile("jpeg"), linked: __ehp.placedFile("linked"), '
+      + 'turnedJpeg: __ehp.placedFile("turnedJpeg"), turnedPng: __ehp.placedFile("turnedPng"), '
       + `other: __ehp.placedFile("other"), nestedXmp: ${JSON.stringify(placeXmp(PLACED_MARKERS.nested))} }`;
     const placing = await this.send(SMOKE_PLACED, files);
     const placedAck = await this.waitEngine(this.response('evora:ack', placing), 30000);
@@ -1509,6 +1613,28 @@ export class EhpBench {
       ];
       const judged = ext === 'tif' ? absent.filter((m) => !TIFF_DROPS.includes(m)) : absent;
       if (judged.length) this.fail('politique-toutes', `${where} : sous « toutes », absents : ${judged.join(', ')}`);
+    }
+    this.politiqueDebout(sc, where);
+  }
+
+  // LUM-14 r4 : sous les trois politiques, chaque photo tournée que place un objet dynamique sort
+  // debout (la source de son bloc SoLd a la taille debout, pas celle des pixels stockés), à sa
+  // résolution.
+  politiqueDebout(sc, where) {
+    const sources = Array.isArray(sc.sources) ? sc.sources : [];
+    if (!sources.length) {
+      this.fail('politique-temoin', `${where} : aucune source d'objet dynamique relevée (blocs SoLd) : la recette ne prouve rien`);
+      return;
+    }
+    for (const t of TURNED) {
+      const [w, h] = t.stored;
+      const lying = sources.filter(([sw, sh]) => sw === w && sh === h);
+      const upright = sources.filter(([sw, sh]) => sw === h && sh === w);
+      if (lying.length) this.fail('politique-debout', `${where} : ${t.name} sort couchée (source ${w} × ${h}, attendue ${h} × ${w})`);
+      else if (!upright.length) this.fail('politique-temoin', `${where} : source de ${t.name} absente (${JSON.stringify(sources)}) : la recette ne prouve rien`);
+      else if (!upright.some(([, , ppi]) => typeof ppi === 'number' && Math.abs(ppi - t.ppi) < 1e-3)) {
+        this.fail('politique-resolution', `${where} : ${t.name} debout à ${upright.map((x) => x[2]).join(', ')} ppi (attendue ${t.ppi})`);
+      }
     }
   }
 

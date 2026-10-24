@@ -305,8 +305,9 @@ impl HostDocs {
     /// `.pcraft` document (the bottom layer, with `nested_xmp` as its XMP and the active document's
     /// EXIF), and the PNG `linked` as an imported PSD keeps it (a document holding that smart
     /// object, written as a PSD and opened again: the smart object names the file, kept in a global
-    /// `lnk2` block, which the active document gets too). Then a global block the engine does not
-    /// read (`evGP`, [`SMOKE_GLOBAL`]) and a note by [`SMOKE_NOTE_AUTHOR`].
+    /// `lnk2` block, which the active document gets too); patch LUM-14 r4: the photos `turned_jpeg`
+    /// and `turned_png`, stored on their side, that their EXIF turns upright. Then a global block
+    /// the engine does not read (`evGP`, [`SMOKE_GLOBAL`]) and a note by [`SMOKE_NOTE_AUTHOR`].
     #[cfg(feature = "evora-smoke")]
     fn smoke_placed(&mut self, app: &mut PhotocraftApp, id: &str, files: crate::ehp::SmokeFiles) {
         use photocraft_doc::{Affine, LayerContent, Note, SmartObject, SmartSource};
@@ -352,6 +353,8 @@ impl HostDocs {
         let mut layers = vec![
             smart("evora-place-png", "evora-place.png", files.png),
             smart("evora-place-jpeg", "evora-place.jpg", files.jpeg),
+            smart("evora-place-tourne-jpeg", "evora-tourne.jpg", files.turned_jpeg),
+            smart("evora-place-tourne-png", "evora-tourne.png", files.turned_png),
             smart("evora-place-other", "evora-place.bin", files.other),
             smart("evora-place-pcraft", "evora-place.pcraft", nested.bytes),
             linked.duplicate(),

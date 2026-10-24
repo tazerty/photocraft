@@ -217,8 +217,6 @@ fn export_copy(doc: &Document, policy: Policy, layered: bool, depth: u32) -> Opt
     let layers = layers_for_export(&doc.layers, &scope);
     // Under `rights`, the notes are left out too (a format that writes layers keeps them in `Anno`).
     let notes = layered && policy == Policy::Rights && !doc.notes.is_empty();
-    // SABORDAGE QA (témoin EVORA-LUM-88, S4) : notes gardées sous « rights ».
-    let notes = notes && doc.notes.is_empty();
     if metadata.is_none() && globals.is_none() && layers.is_none() && !notes {
         return None;
     }
@@ -261,10 +259,6 @@ enum FileKey {
 /// The PSD global blocks of an export under `policy` (`none` or `rights`): those of
 /// [`GLOBAL_KEPT`], and the notes (`Anno`) under `none`; `None` when every block is kept.
 fn globals_for_export(blocks: &[PsdGlobalBlock], policy: Policy) -> Option<Vec<PsdGlobalBlock>> {
-    // SABORDAGE QA (témoin EVORA-LUM-88, S1) : blocs globaux gardés tels quels.
-    if !blocks.is_empty() {
-        return None;
-    }
     let kept = |key: &[u8; 4]| GLOBAL_KEPT.contains(key) || (policy == Policy::None && *key == ANNO);
     if blocks.iter().all(|(_, key, _)| kept(key)) {
         return None;
@@ -350,10 +344,6 @@ fn layer_for_export(layer: &Layer, scope: &Scope<'_>) -> Layer {
 /// read, it holds more than one packet (in one `cust` item or in several) or a packet that is not
 /// text, or nothing is left.
 fn shmd_for_export(data: &[u8], policy: Policy) -> Option<Arc<Vec<u8>>> {
-    // SABORDAGE QA (témoin EVORA-LUM-88, S3) : bloc shmd nettoyé en place comme avant LUM-14 r3.
-    if !data.is_empty() {
-        return shmd_before_r3(data, policy);
-    }
     let items = photocraft_psd::metadata::parse_shmd(data).ok()?;
     let mut time = None;
     let mut packets = Vec::new();
@@ -396,37 +386,12 @@ fn shmd_for_export(data: &[u8], policy: Policy) -> Option<Arc<Vec<u8>>> {
     Some(Arc::new(photocraft_psd::metadata::write_shmd(&[item])))
 }
 
-// SABORDAGE QA (témoin EVORA-LUM-88, S3) : le nettoyage en place d'avant LUM-14 r3 (premier paquet
-// seul, le reste du bloc gardé sans relecture), à retirer.
-fn shmd_before_r3(data: &[u8], policy: Policy) -> Option<Arc<Vec<u8>>> {
-    if photocraft_psd::metadata::parse_shmd(data).is_err() {
-        return None;
-    }
-    let Some((xmp, rest)) = photocraft_psd::metadata::take_layer_xmp(data) else { return Some(Arc::new(data.to_vec())) };
-    let cleaned = match policy {
-        Policy::Rights => None,
-        _ => match xmp_without_location(&xmp) {
-            Edit::Kept => Some(xmp),
-            Edit::Changed(c) => Some(c),
-            Edit::Dropped => None,
-        },
-    };
-    match cleaned {
-        Some(packet) => photocraft_psd::metadata::put_layer_xmp(rest.as_deref(), &packet).ok().map(Arc::new),
-        None => rest.map(Arc::new),
-    }
-}
-
 /// A smart object, for a format that writes layers (patch LUM-14 r3): the file it places cleaned
 /// and embedded in it (`placed_file`), its placed-layer blocks written again by the exporter from
 /// the document; a file that cannot be cleaned with certainty, or a link to a file outside the
 /// document, makes the layer its pixels, as Layer › Rasterize › Smart Object does (its rendered
 /// appearance, in the document's pixel format).
 fn smart_for_export(layer: &mut Layer, scope: &Scope<'_>) {
-    // SABORDAGE QA (témoin EVORA-LUM-88, S2) : fichiers placés laissés tels quels.
-    if scope.layered {
-        return;
-    }
     let LayerContent::Smart(sm) = &mut layer.content else { return };
     match placed_file(&sm.source, scope) {
         Some(source) => {

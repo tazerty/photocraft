@@ -35,6 +35,14 @@
 //! message per file, under `maxExportBytes`), whose `evora:ack` is read.
 //! Patch LUM-12: `evora:open {new: true}` opens the engine's New Document dialog for the host's
 //! `docRef` (`host_docs`).
+//! Patch LUM-02: with `pick.drive` effective, every file the engine asks to read comes from the
+//! host's picker (`evora:pick`, answered by `evora:file` then `evora:ack`, `host_pick`), never
+//! from the browser's own.
+//! Patch LUM-11: `evora:font` (`font.inject`) hands over a TrueType or OpenType file, registered
+//! at the start of a frame and listed in the font menus (`host_docs`).
+//! Patch LUM-13: with `ui.focus-out` effective, F6 sends `evora:focus-out` (`host_focus`), the
+//! way out of the engine at the keyboard (Evora's HOST-PROTOCOL §7.9, A-19). The capability is
+//! additive: the engine still speaks EHP 1.0, which a host of minor 0 accepts.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -46,19 +54,22 @@ use wasm_bindgen::{JsCast as _, JsValue, closure::Closure};
 const APP: &str = "lumbra";
 const EHP: &str = "1.0";
 /// What this engine honours and its smoke test exercises (§9.1). Not declared: `doc.multi`,
-/// `pick.drive`, `font.inject`, `media.*`, `author`, `storage.memory`.
-const CAPABILITIES: [&str; 11] = [
+/// `media.*`, `author`, `storage.memory`.
+const CAPABILITIES: [&str; 14] = [
     "doc.open",
     "doc.save",
     "doc.saved-ack",
     "doc.dirty",
     "doc.request-save",
     "export.drive",
+    "pick.drive",
     "storage.ns",
     "storage.purge",
     "live.lang",
     "live.theme",
     "command",
+    "font.inject",
+    "ui.focus-out",
 ];
 /// The admitted parent origins, beside `index.html` (§2.3).
 const CONFIG: &str = "evora-host.json";
@@ -83,7 +94,10 @@ const ACK_CODES: [&str; 16] = [
     "server",
     "timeout",
 ];
-const CAPABILITY_NAMES: [&str; 18] = [
+/// The capabilities an `evora:init` may name: §4.2, and `ui.focus-out` of the 1.1 amendment A-19
+/// (§7.9), which a host offers once it honours `evora:focus-out` (patch LUM-13).
+const CAPABILITY_NAMES: [&str; 19] = [
+    "ui.focus-out",
     "doc.open",
     "doc.save",
     "doc.saved-ack",
@@ -132,6 +146,8 @@ pub enum HostEvent {
     /// `evora:saved` answering the `evora:save` `re`, with `doc.saved-ack` effective (LUM-04);
     /// `doc_ref`: the new document of a successful `saveAs` (LUM-03).
     Saved { re: String, ok: bool, doc_ref: Option<String> },
+    /// `evora:font {family, format, bytes}` (patch LUM-11): a font file to register.
+    Font { id: String, family: String, bytes: Vec<u8> },
 }
 
 /// A save handed to the host, bound to its document at the end of the frame (`host_docs`).
@@ -292,6 +308,21 @@ impl Bridge {
         if let Some(payload) = object(&[("code", code.into())]) {
             let _ = self.send("evora:failed", None, &payload, None);
         }
+    }
+
+    /// `evora:focus-out {}` (patch LUM-13, amendment A-19 of §7.9): the user asked, at the
+    /// keyboard, to leave the engine. Only with `ui.focus-out` effective; `false` when not sent.
+    pub fn focus_out(&self) -> bool {
+        if !self.has("ui.focus-out") {
+            return false;
+        }
+        let Some(payload) = object(&[]) else { return false };
+        self.send("evora:focus-out", None, &payload, None).is_some()
+    }
+
+    /// Post `kind` to the admitted parent (the picker of `host_pick`); returns its id.
+    pub(crate) fn post(&self, kind: &str, re: Option<&str>, payload: &js_sys::Object) -> Option<String> {
+        self.send(kind, re, payload, None)
     }
 
     /// `evora:dirty {dirty, docRef}` (`doc.dirty`).
@@ -466,8 +497,13 @@ impl Bridge {
             "evora:theme" => Some("live.theme"),
             "evora:purge" => Some("storage.purge"),
             "evora:command" => Some("command"),
-            // The host's answer to an `evora:export` (patch LUM-03); any other is ignored.
-            "evora:ack" => Some("export.drive"),
+            // A file answering the engine's picker (patch LUM-02, §4.3).
+            "evora:file" => Some("pick.drive"),
+            "evora:font" => Some("font.inject"),
+            // The host's answer to an `evora:export` (patch LUM-03) or the close of a picker
+            // (patch LUM-02): read only when it answers one of them (`on_ack`), each sent only
+            // with its capability effective; any other is ignored.
+            "evora:ack" => None,
             // Unknown here, or a capability this engine doesn't declare: ignored (§4.1, §10).
             _ => return,
         };
@@ -490,7 +526,7 @@ impl Bridge {
             }
         };
         // `re` answers something: on a response only (§3).
-        if matches!(kind.as_str(), "evora:init" | "evora:saved" | "evora:ack") != re.is_some() {
+        if matches!(kind.as_str(), "evora:init" | "evora:saved" | "evora:ack" | "evora:file") != re.is_some() {
             return;
         }
         let payload = get(&data, "payload");
@@ -510,6 +546,8 @@ impl Bridge {
             "evora:purge" => self.on_purge(&id, &payload),
             "evora:command" => self.on_command(&id, &payload),
             "evora:ack" => self.on_ack(re.as_deref(), &payload),
+            "evora:file" => self.on_file(re.as_deref(), &payload),
+            "evora:font" => self.on_font(&id, &payload),
             _ => {}
         }
     }
@@ -641,10 +679,12 @@ impl Bridge {
     }
 
     /// `evora:ack {ok, code?}` answering an `evora:export` (patch LUM-03, §7.4): the export is
-    /// settled; a refusal is logged (the host shows its own message). Anything else is ignored.
+    /// settled; a refusal is logged (the host shows its own message). Answering an `evora:pick`
+    /// (patch LUM-02, §7.6), it closes the picker: the files received go to the dialog that asked,
+    /// or nothing on a refusal. Anything else is ignored.
     fn on_ack(&self, re: Option<&str>, p: &JsValue) {
         let Some(re) = re else { return };
-        if !self.0.borrow().pending_exports.iter().any(|e| e == re) || !only_keys(p, &["ok", "code"]) {
+        if !only_keys(p, &["ok", "code"]) {
             return;
         }
         let Some(ok) = get(p, "ok").as_bool() else { return };
@@ -653,10 +693,61 @@ impl Bridge {
         if !code_ok || (!ok && code.is_undefined()) {
             return;
         }
-        self.0.borrow_mut().pending_exports.retain(|e| e != re);
-        if !ok {
-            log::warn!("photocraft-web: the host refused an export ({})", code.as_string().unwrap_or_default());
+        let export = self.0.borrow().pending_exports.iter().any(|e| e == re);
+        if export {
+            self.0.borrow_mut().pending_exports.retain(|e| e != re);
+            if !ok {
+                log::warn!("photocraft-web: the host refused an export ({})", code.as_string().unwrap_or_default());
+            }
+            return;
         }
+        // Not the picker's either: ignored there.
+        crate::host_pick::settle(re, ok, code.as_string().as_deref());
+    }
+
+    /// `evora:file {path, name?, bytes | url | error}` answering the engine's picker (patch LUM-02,
+    /// §4.3): kept by `host_pick` until the `evora:ack` that closes the exchange.
+    fn on_file(&self, re: Option<&str>, p: &JsValue) {
+        let Some(re) = re else { return };
+        let max = self.0.borrow().max_document;
+        crate::host_pick::on_file(re, p, max);
+    }
+
+    /// `evora:font {family, format, weight?, style?, bytes}` (patch LUM-11, §4.3): a TrueType or
+    /// OpenType file, an `ArrayBuffer` of 1 byte up to `maxDocumentBytes` (the only bound the engine
+    /// knows; the host applies its own font limit before sending), registered at the start of a
+    /// frame and acknowledged there (`host_docs`). Over the bound: `too_large`. A malformed message
+    /// is ignored (§5.2). The weight and the style are the file's own: they are checked, not used.
+    fn on_font(&self, id: &str, p: &JsValue) {
+        if !only_keys(p, &["family", "format", "weight", "style", "bytes"]) {
+            return;
+        }
+        let Some(family) = get(p, "family").as_string().filter(|f| is_family(f)) else { return };
+        if !get(p, "format").as_string().is_some_and(|f| f == "ttf" || f == "otf") {
+            return;
+        }
+        let weight = get(p, "weight");
+        if !weight.is_undefined() && !(js_sys::Number::is_safe_integer(&weight) && weight.as_f64().is_some_and(|w| (1.0..=1000.0).contains(&w))) {
+            return;
+        }
+        let style = get(p, "style");
+        if !style.is_undefined() && !style.as_string().is_some_and(|s| s == "normal" || s == "italic") {
+            return;
+        }
+        let bytes = get(p, "bytes");
+        if !bytes.is_instance_of::<js_sys::ArrayBuffer>() {
+            return;
+        }
+        let length = f64::from(bytes.unchecked_ref::<js_sys::ArrayBuffer>().byte_length());
+        if length < 1.0 {
+            return;
+        }
+        if length > self.0.borrow().max_document {
+            self.ack(id, false, Some("too_large"));
+            return;
+        }
+        let data = js_sys::Uint8Array::new(&bytes).to_vec();
+        self.push(HostEvent::Font { id: id.to_owned(), family, bytes: data });
     }
 
     fn on_request_save(&self, id: &str, p: &JsValue) {
@@ -864,7 +955,7 @@ fn envelope(kind: &str, re: Option<&str>, payload: &js_sys::Object) -> Option<(j
     Some((object(&fields)?, id))
 }
 
-fn object(fields: &[(&str, JsValue)]) -> Option<js_sys::Object> {
+pub(crate) fn object(fields: &[(&str, JsValue)]) -> Option<js_sys::Object> {
     let m = js_sys::Object::new();
     for (key, value) in fields {
         js_sys::Reflect::set(&m, &JsValue::from_str(key), value).ok()?;
@@ -872,7 +963,7 @@ fn object(fields: &[(&str, JsValue)]) -> Option<js_sys::Object> {
     Some(m)
 }
 
-fn get(data: &JsValue, key: &str) -> JsValue {
+pub(crate) fn get(data: &JsValue, key: &str) -> JsValue {
     if !data.is_object() {
         return JsValue::UNDEFINED;
     }
@@ -889,7 +980,7 @@ fn plain_object(v: &JsValue) -> bool {
 }
 
 /// No property outside `allowed` (`additionalProperties: false`).
-fn only_keys(v: &JsValue, allowed: &[&str]) -> bool {
+pub(crate) fn only_keys(v: &JsValue, allowed: &[&str]) -> bool {
     if !v.is_object() {
         return false;
     }
@@ -969,6 +1060,12 @@ fn ulid() -> String {
 /// `name` of §4.2: 1 to 255 characters, no `/`, `\` or control character.
 pub fn is_name(n: &str) -> bool {
     (1..=255).contains(&n.chars().count()) && !n.chars().any(|c| c == '/' || c == '\\' || c.is_control())
+}
+
+/// `family` of `evora:font` (§4.3): not empty, no control character. Its length limit is the
+/// host's (`{EHP_MAX_FONT_FAMILY_LENGTH}`), applied before sending.
+fn is_family(f: &str) -> bool {
+    !f.trim().is_empty() && !f.chars().any(char::is_control)
 }
 
 /// A file name the host's schema accepts (`fallback` when nothing is left).

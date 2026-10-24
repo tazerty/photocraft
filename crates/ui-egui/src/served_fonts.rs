@@ -48,6 +48,36 @@ pub fn install(app: &mut PhotocraftApp, delivered: Vec<(String, Vec<u8>)>) {
     }
 }
 
+/// Evora build (patch LUM-11): a font file the host hands over (`evora:font`), registered at once
+/// and listed in the font menus. The type layers set in `family`, or falling back to it, are
+/// re-rendered as for a served font ([`install`]). Returns the families the file registers: empty
+/// when the engine cannot read it as a font, in which case nothing is listed.
+pub fn inject(app: &mut PhotocraftApp, family: &str, bytes: Vec<u8>) -> Vec<String> {
+    let families = vec![family.to_string()];
+    let mut layers: Vec<(DocId, LayerId)> = Vec::new();
+    for st in app.session.documents() {
+        for (_, _, l) in st.doc.walk() {
+            if let LayerContent::Text(t) = &l.content
+                && redraws_for(t, &families)
+                && crate::type_tool::shows_own_layout(&st.doc, t)
+                && !layers.contains(&(st.doc.id, l.id))
+            {
+                layers.push((st.doc.id, l.id));
+            }
+        }
+    }
+    let added = photocraft_text::shared().lock().unwrap_or_else(PoisonError::into_inner).fonts.register_font_data(bytes);
+    if added.is_empty() {
+        return added;
+    }
+    add_families(added.iter().cloned());
+    if !layers.is_empty() {
+        let busy = app.session.refresh_type_layers(&layers);
+        PENDING.lock().unwrap_or_else(PoisonError::into_inner).extend(busy);
+    }
+    added
+}
+
 /// Should the layer be redrawn when `families` arrive: it uses one of them, or its text is in a
 /// script one of them is the served fallback for?
 fn redraws_for(t: &TextLayer, families: &[String]) -> bool {

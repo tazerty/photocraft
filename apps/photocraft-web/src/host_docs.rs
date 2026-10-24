@@ -34,6 +34,11 @@
 //! Patch LUM-12: `evora:open {docRef, name, new: true}` opens the engine's New Document dialog,
 //! named after the host's document; the document it makes is the host's `docRef` (acknowledged
 //! then, `dirty: false` next, §7.1); cancelling the dialog answers `cancelled`.
+//!
+//! Patch LUM-11: `evora:font` registers the file in the engine's font database and lists its
+//! families in the font menus; the type layers set in that family, or falling back to it, are
+//! drawn again (`served_fonts::inject`). A file the engine cannot read as a font registers
+//! nothing and is refused with `invalid_content`.
 
 use std::sync::Arc;
 
@@ -162,6 +167,8 @@ pub struct HostDocs {
     forced: Vec<String>,
     /// The blank document the host asked for, its dialog open (patch LUM-12).
     new_doc: Option<NewDoc>,
+    /// The families the host's fonts registered, in order (patch LUM-11, `diag.stats`).
+    fonts: Vec<String>,
 }
 
 impl HostDocs {
@@ -175,6 +182,7 @@ impl HostDocs {
             saved_before: Vec::new(),
             forced: Vec::new(),
             new_doc: None,
+            fonts: Vec::new(),
         }
     }
 
@@ -204,8 +212,26 @@ impl HostDocs {
                 }
                 HostEvent::Command { id, command } => self.command(app, ctx, &id, &command),
                 HostEvent::Saved { re, ok, doc_ref } => self.saved(app, &re, ok, doc_ref),
+                HostEvent::Font { id, family, bytes } => self.font(app, &id, &family, bytes),
             }
         }
+    }
+
+    /// `evora:font` (patch LUM-11): the file registers its families, listed in the font menus, or
+    /// nothing (`invalid_content`).
+    fn font(&mut self, app: &mut PhotocraftApp, id: &str, family: &str, bytes: Vec<u8>) {
+        let added = photocraft_ui_egui::served_fonts::inject(app, family, bytes);
+        if added.is_empty() {
+            log::warn!("photocraft-web: the host's font {family:?} could not be read as a font");
+            self.bridge.ack(id, false, Some("invalid_content"));
+            return;
+        }
+        for name in added {
+            if !self.fonts.contains(&name) {
+                self.fonts.push(name);
+            }
+        }
+        self.bridge.ack(id, true, None);
     }
 
     /// `evora:saved` for a save in flight (patch LUM-04, HOST-PROTOCOL §4.3 and §4.5). `ok: true`
@@ -275,7 +301,7 @@ impl HostDocs {
         match command {
             "diag.stats" => {
                 let host: Vec<(String, usize)> = self.opened.iter().filter_map(|r| index_of(app, r).map(|i| (r.clone(), i))).collect();
-                self.bridge.ack_result(id, &crate::host_commands::stats(app, &host, &self.renderer));
+                self.bridge.ack_result(id, &crate::host_commands::stats(app, &host, &self.renderer, &self.fonts));
             }
             "diag.menus" => self.bridge.ack_result(id, &crate::host_commands::menus(app)),
             _ => match crate::host_commands::run_engine(app, ctx, command) {

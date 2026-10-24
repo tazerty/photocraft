@@ -35,6 +35,15 @@ mod host_docs;
 // Evora build (patch LUM-10): the commands the host may run (`evora:command`).
 #[cfg(target_arch = "wasm32")]
 mod host_commands;
+// Evora build (patch LUM-02): the host's file picker (`evora:pick`).
+#[cfg(target_arch = "wasm32")]
+mod host_pick;
+// Evora build (patch LUM-09): the menu items the host build hides.
+#[cfg(target_arch = "wasm32")]
+mod host_menus;
+// Evora build (patch LUM-13): the exit key, `evora:focus-out`.
+#[cfg(target_arch = "wasm32")]
+mod host_focus;
 
 #[cfg(target_arch = "wasm32")]
 mod web;

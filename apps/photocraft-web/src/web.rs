@@ -166,8 +166,12 @@ pub fn start() {
                         guard_unload(unsaved.clone());
                     }
                     // Evora build (patch E4): the host's requests reach the app between frames.
+                    // Patch LUM-09: the menu items the host build hides; patch LUM-13: the exit
+                    // key (F6), with `ui.focus-out` effective.
                     let host = shell_bridge.map(|bridge| {
                         bridge.attach(cc.egui_ctx.clone());
+                        crate::host_menus::install();
+                        crate::host_focus::listen(&bridge);
                         crate::host_docs::HostDocs::new(bridge, renderer)
                     });
                     Ok(Box::new(WebShell { app, inbox, place_inbox, unsaved, served, database, presets, host }))
@@ -534,6 +538,9 @@ impl eframe::App for WebShell {
 }
 
 fn services(inbox: Inbox, place_inbox: Inbox, cursor_pos: photocraft_ui_egui::CursorPosFn, bridge: Option<crate::ehp::Bridge>) -> Services {
+    // Evora build (patch LUM-02): under the bridge, the files the engine reads come from the
+    // host's picker (`host_pick`), never from the browser's.
+    let picker = bridge.clone();
     // Evora build (patch E4): with the bridge, the host's document is saved to the host and nothing
     // is downloaded (`host_docs::write`); without it, upstream's download.
     let write_unconfirmed = bridge.is_none();
@@ -549,7 +556,13 @@ fn services(inbox: Inbox, place_inbox: Inbox, cursor_pos: photocraft_ui_egui::Cu
         export: Some(Box::new(|doc: &Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {
             photocraft_io::export(doc, path, &settings.io_options()).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
         })),
-        file_dialog: Some(Box::new(|request, _parent, reply| match request {
+        file_dialog: Some(Box::new(move |request, _parent, reply| match request {
+            // Evora build (patch LUM-02): the host's picker (`evora:pick`), never the browser's.
+            FileDialogRequest::Open { multiple, extensions, .. } if picker.is_some() => {
+                if let Some(bridge) = &picker {
+                    crate::host_pick::open(bridge, multiple, extensions, reply);
+                }
+            }
             // The browser's file picker hands over the files' contents, not paths. File › Open
             // asks for several files (`multiple`), each opened in its own tab.
             FileDialogRequest::Open { multiple, extensions, .. } => wasm_bindgen_futures::spawn_local(async move {

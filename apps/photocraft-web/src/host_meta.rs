@@ -23,10 +23,57 @@
 //! still names a GPS or a place once cleaned (any prefix, any case), a raw profile it cannot
 //! decode. The working document keeps everything: it
 //! stays the user's own file. Without the bridge, upstream's exports are unchanged.
+//!
+//! Patch LUM-14 r2 (Evora's LQ-26 (b), C41): the host chooses the policy (`evora:init`, preference
+//! `evora.locationPolicy`, read by `host_prefs`), and the layers are cleaned as well:
+//! - `none`, the default (also for a missing or unknown value): as above;
+//! - `rights`: the rights alone leave, whatever the export dialog chose: an XMP packet rebuilt
+//!   from the document's copyright, its status and URL (the engine's own reading, Save for Web's
+//!   « Copyright »), the free-form text entries named after the rights, no EXIF, no IPTC record or
+//!   other description resource, no layer XMP;
+//! - `all`: the export dialog's choice, location included (the user's explicit choice).
+//!
+//! Since upstream v0.15.1 a PSD (and a layered TIFF) writes each layer's own XMP packet
+//! (`Layer::xmp`), and a layer's `shmd` block that still holds one (a document from an earlier
+//! version) is written as it is: under `none` both lose their location like the document's packet
+//! (an unreadable `shmd` block is left out whole), under `rights` both lose their packet. The
+//! PSD's EXIF data 3 resource (1059), which the engine does not read, is left out.
 
 use std::sync::Arc;
 
-use photocraft_doc::{Document, Metadata};
+use photocraft_doc::{Document, Layer, Metadata};
+
+/// What an export keeps of the metadata that locates the picture (patch LUM-14 r2).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Policy {
+    /// The export dialog's choice, without the location (the default).
+    #[default]
+    None,
+    /// The rights alone.
+    Rights,
+    /// The export dialog's choice, location included.
+    All,
+}
+
+impl Policy {
+    /// The host's name for a policy (`none`, `rights`, `all`); `None` for any other.
+    pub fn parse(name: &str) -> Option<Policy> {
+        match name {
+            "none" => Some(Policy::None),
+            "rights" => Some(Policy::Rights),
+            "all" => Some(Policy::All),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Policy::None => "none",
+            Policy::Rights => "rights",
+            Policy::All => "all",
+        }
+    }
+}
 
 /// IFD0's pointer to the GPS directory (TIFF tag 34853).
 const TAG_GPS_IFD: u16 = 0x8825;
@@ -39,6 +86,15 @@ const MAX_EXIF_DIRECTORIES: usize = 64;
 const XMP_URIS: [&str; 2] = ["adobe:ns:meta/", "http://www.w3.org/1999/02/22-rdf-syntax-ns#"];
 /// The PSD image resource of the IPTC-NAA record.
 const IPTC_RESOURCE: u16 = 1028;
+/// The PSD image resource « EXIF data 3 », which the engine does not read: left out of exports.
+const EXIF_DATA_3: u16 = 1059;
+/// PSD image resources that describe the picture (caption, IPTC-NAA record, EXIF data 3, caption
+/// digest): left out when only the rights leave.
+const DESCRIPTIVE_RESOURCES: [u16; 4] = [1008, IPTC_RESOURCE, EXIF_DATA_3, 1061];
+/// The free-form text entries kept when only the rights leave (keyword, in lower case).
+const RIGHTS_KEYS: [&str; 2] = ["copyright", "rights"];
+/// A layer's metadata block in a PSD (`shmd`), where its own XMP packet lives.
+const SHMD: [u8; 4] = *b"shmd";
 /// IPTC record 2 datasets that name a place: content location code and name, city, sub-location,
 /// province or state, country code and name.
 const IPTC_PLACES: [u8; 7] = [26, 27, 90, 92, 95, 100, 101];
@@ -81,16 +137,110 @@ enum Edit<T> {
     Dropped,
 }
 
-/// A copy of `doc` to encode for `path`: without its location, when it has one and `path` is an
-/// export (not a `.pcraft` working document). `None`: encode `doc` itself.
-pub fn for_export(doc: &Document, path: &str) -> Option<Document> {
-    if photocraft_engine::file_cmds::extension(path).as_deref() == Some("pcraft") {
+/// A copy of `doc` to encode for `path` under `policy`: without its location (or with its rights
+/// alone), when it has metadata to change and `path` is an export (not a `.pcraft` working
+/// document). `None`: encode `doc` itself.
+pub fn for_export(doc: &Document, path: &str, policy: Policy) -> Option<Document> {
+    if policy == Policy::All || photocraft_engine::file_cmds::extension(path).as_deref() == Some("pcraft") {
         return None;
     }
-    let metadata = without_location(&doc.metadata)?;
+    let metadata = match policy {
+        Policy::Rights => Some(rights_only(doc)),
+        _ => without_location(&doc.metadata),
+    };
+    let layers = layers_for_export(&doc.layers, policy);
+    if metadata.is_none() && layers.is_none() {
+        return None;
+    }
     let mut out = doc.clone();
-    out.metadata = metadata;
+    if let Some(metadata) = metadata {
+        out.metadata = metadata;
+    }
+    if let Some(layers) = layers {
+        out.layers = layers;
+    }
     Some(out)
+}
+
+/// The rights alone (policy `rights`, see the module docs). What is kept is cleaned of any
+/// location all the same.
+fn rights_only(doc: &Document) -> Metadata {
+    let m = &doc.metadata;
+    let xmp = photocraft_engine::web_cmds::web_xmp(doc, photocraft_engine::web_cmds::WebMetadata::Copyright).and_then(|x| match xmp_without_location(&x) {
+        Edit::Kept => Some(x),
+        Edit::Changed(c) => Some(c),
+        Edit::Dropped => None,
+    });
+    let text = m
+        .text
+        .iter()
+        .filter(|(key, _)| RIGHTS_KEYS.contains(&key.to_ascii_lowercase().as_str()))
+        .filter_map(|(key, value)| match text_entry(key, value) {
+            Edit::Kept => Some((key.clone(), value.clone())),
+            Edit::Changed(v) => Some((key.clone(), v)),
+            Edit::Dropped => None,
+        })
+        .collect();
+    let psd_resources = m.psd_resources.iter().filter(|(id, _, _)| !DESCRIPTIVE_RESOURCES.contains(id)).cloned().collect();
+    Metadata { xmp, exif: None, text, psd_resources, ..m.clone() }
+}
+
+/// Does `layer`, or a layer of its group, hold an XMP packet or a `shmd` block?
+fn layer_has_metadata(layer: &Layer) -> bool {
+    layer.xmp.is_some() || layer.psd_blocks.iter().any(|(key, _)| *key == SHMD) || layer.children().is_some_and(|ch| ch.iter().any(layer_has_metadata))
+}
+
+/// The layers for an export under `policy` (`none` or `rights`); `None`: no layer holds metadata.
+fn layers_for_export(layers: &[Layer], policy: Policy) -> Option<Vec<Layer>> {
+    if !layers.iter().any(layer_has_metadata) {
+        return None;
+    }
+    Some(layers.iter().map(|l| layer_for_export(l, policy)).collect())
+}
+
+/// One layer (and its group's layers) for an export: its XMP packet without its location, or none
+/// for the rights alone; its `shmd` block likewise (`shmd_for_export`).
+fn layer_for_export(layer: &Layer, policy: Policy) -> Layer {
+    let mut out = layer.clone();
+    out.xmp = match (&layer.xmp, policy) {
+        (Some(_), Policy::Rights) | (None, _) => None,
+        (Some(x), _) => match xmp_without_location(x) {
+            Edit::Kept => Some(x.clone()),
+            Edit::Changed(c) => Some(Arc::from(c)),
+            Edit::Dropped => None,
+        },
+    };
+    out.psd_blocks = layer
+        .psd_blocks
+        .iter()
+        .filter_map(|(key, data)| if *key == SHMD { shmd_for_export(data, policy).map(|d| (*key, d)) } else { Some((*key, data.clone())) })
+        .collect();
+    if let (Some(children), Some(source)) = (out.children_mut(), layer.children()) {
+        *children = source.iter().map(|c| layer_for_export(c, policy)).collect();
+    }
+    out
+}
+
+/// A layer's `shmd` block for an export: unreadable, left out whole; a packet still inside it
+/// cleaned of its location (taken out for the rights alone), the rest of the block kept; a block
+/// without a packet kept as it is.
+fn shmd_for_export(data: &Arc<Vec<u8>>, policy: Policy) -> Option<Arc<Vec<u8>>> {
+    if photocraft_psd::metadata::parse_shmd(data).is_err() {
+        return None;
+    }
+    let Some((xmp, rest)) = photocraft_psd::metadata::take_layer_xmp(data) else { return Some(data.clone()) };
+    let cleaned = match policy {
+        Policy::Rights => None,
+        _ => match xmp_without_location(&xmp) {
+            Edit::Kept => Some(xmp),
+            Edit::Changed(c) => Some(c),
+            Edit::Dropped => None,
+        },
+    };
+    match cleaned {
+        Some(packet) => photocraft_psd::metadata::put_layer_xmp(rest.as_deref(), &packet).ok().map(Arc::new),
+        None => rest.map(Arc::new),
+    }
 }
 
 /// The metadata without its location; `None` when nothing locates the picture.
@@ -100,6 +250,11 @@ fn without_location(m: &Metadata) -> Option<Metadata> {
     let mut resources = Vec::with_capacity(m.psd_resources.len());
     let mut resources_changed = false;
     for (id, name, data) in &m.psd_resources {
+        // EXIF data 3: not read by the engine, so never passed on unread.
+        if *id == EXIF_DATA_3 {
+            resources_changed = true;
+            continue;
+        }
         if *id != IPTC_RESOURCE {
             resources.push((*id, name.clone(), data.clone()));
             continue;

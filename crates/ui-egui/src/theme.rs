@@ -559,16 +559,20 @@ impl Tokens {
             // accent and primary button, which takes white text (6.3:1). Text colours hold 4.5:1 on
             // the surfaces and the hover, pressed and selected states; the accent text is a lighter
             // indigo on dark surfaces and a deeper one on light surfaces. The UI font stays Inter.
+            // Patch LUM-06 r2: field borders at #71717A, 3:1 on the fields and panels they sit on
+            // (WCAG 1.4.11; they were 1.5:1); a strictly neutral canvas surround (R = G = B), so it
+            // tints no judgement of tones; the accent family derived from the host's accent
+            // (`with_evora_accent`), its marks and focus rings at 3:1 or more.
             ThemeKind::Evora => Tokens {
                 kind,
                 chrome: Color32::from_rgb(27, 27, 31),
-                canvas: Color32::from_rgb(12, 12, 14),
-                canvas_dot: Color32::from_rgb(12, 12, 14),
+                canvas: Color32::from_rgb(12, 12, 12),
+                canvas_dot: Color32::from_rgb(12, 12, 12),
                 dock: Color32::from_rgb(20, 20, 23),
                 card: Color32::from_rgb(24, 24, 27),
                 card_border: Color32::from_rgb(39, 39, 42),
                 field: Color32::from_rgb(33, 33, 37),
-                field_border: Color32::from_rgb(63, 63, 70),
+                field_border: Color32::from_rgb(113, 113, 122),
                 hover: Color32::from_rgb(45, 45, 50),
                 pressed: Color32::from_rgb(55, 55, 61),
                 text: Color32::from_rgb(250, 250, 250),
@@ -598,17 +602,18 @@ impl Tokens {
                 caption_close: Color32::from_rgb(220, 38, 38),
                 caption_close_text: Color32::WHITE,
                 scrim: Color32::from_black_alpha(110),
-            },
+            }
+            .with_evora_accent(host_accent()),
             ThemeKind::EvoraLight => Tokens {
                 kind,
                 chrome: Color32::from_rgb(244, 244, 245),
-                canvas: Color32::from_rgb(228, 228, 231),
-                canvas_dot: Color32::from_rgb(212, 212, 216),
+                canvas: Color32::from_rgb(228, 228, 228),
+                canvas_dot: Color32::from_rgb(212, 212, 212),
                 dock: Color32::from_rgb(238, 238, 240),
                 card: Color32::from_rgb(250, 250, 250),
                 card_border: Color32::from_rgb(228, 228, 231),
                 field: Color32::WHITE,
-                field_border: Color32::from_rgb(212, 212, 216),
+                field_border: Color32::from_rgb(113, 113, 122),
                 hover: Color32::from_rgb(239, 239, 241),
                 pressed: Color32::from_rgb(228, 228, 231),
                 text: Color32::from_rgb(24, 24, 27),
@@ -638,7 +643,8 @@ impl Tokens {
                 caption_close: Color32::from_rgb(220, 38, 38),
                 caption_close_text: Color32::WHITE,
                 scrim: Color32::from_black_alpha(110),
-            },
+            }
+            .with_evora_accent(host_accent()),
             ThemeKind::BreezeLight => Tokens {
                 kind,
                 chrome: Color32::from_rgb(219, 222, 226),
@@ -939,6 +945,79 @@ impl Tokens {
     pub fn dark(&self) -> bool {
         self.kind.is_dark()
     }
+
+    /// Evora build (patch LUM-06 r2): the accent family of the Evora themes, from `accent` (the
+    /// host's, E2-c, or Evora's indigo). The accent draws marks on the surfaces (focus rings,
+    /// focused borders, toggles, slider dots): it holds WCAG's 3:1 non-text contrast on the fields,
+    /// cards, chrome and docks they sit on (E2-d), moved towards white in the dark theme and
+    /// towards black in the light one until it does. The accent text holds 4.5:1 on every surface
+    /// that carries text, hovered and pressed included. The focused and active border is the
+    /// accent itself, opaque (its translucent form fell under 3:1). The primary button keeps the
+    /// host's colour, with white or near-black text, whichever reads better.
+    fn with_evora_accent(self, accent: Color32) -> Tokens {
+        let dark = self.dark();
+        let toward = if dark { Color32::WHITE } else { Color32::BLACK };
+        let marks = [self.field, self.card, self.chrome, self.dock];
+        let texts = [self.card, self.chrome, self.field, self.dock, self.hover, self.pressed];
+        let mark = reach(accent, toward, &marks, MARK_CONTRAST);
+        let ink = Color32::from_rgb(24, 24, 27);
+        let primary_text = if contrast_ratio(Color32::WHITE, accent) >= contrast_ratio(ink, accent) { Color32::WHITE } else { ink };
+        Tokens {
+            accent: mark,
+            accent_soft: Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), if dark { 64 } else { 40 }),
+            accent_border: mark,
+            accent_text: reach(accent, toward, &texts, TEXT_CONTRAST),
+            primary_bg: accent,
+            primary_text,
+            ..self
+        }
+    }
+}
+
+/// Evora build (patch LUM-06 r2): Evora's indigo, the accent of the Evora themes until the host
+/// names one (`evora:init.accent`, `evora:theme`).
+const EVORA_ACCENT: Color32 = Color32::from_rgb(79, 70, 229);
+/// WCAG 2.1 thresholds, non-text (1.4.11) and text (1.4.3), with a little room so the colours
+/// still pass once rounded to 8 bits and measured again elsewhere.
+const MARK_CONTRAST: f32 = 3.05;
+const TEXT_CONTRAST: f32 = 4.55;
+
+thread_local! {
+    /// Evora build (patch LUM-06 r2, E2-c): the accent the host chose; `None` until it does.
+    /// Only the two Evora themes take it ([`Tokens::for_kind`]).
+    static HOST_ACCENT: std::cell::Cell<Option<Color32>> = const { std::cell::Cell::new(None) };
+}
+
+/// Evora build (patch LUM-06 r2, E2-c): the host's accent (an opaque colour), for the Evora themes
+/// from their next [`apply`]; `None`: Evora's indigo.
+pub fn set_host_accent(accent: Option<Color32>) {
+    HOST_ACCENT.with(|a| a.set(accent));
+}
+
+fn host_accent() -> Color32 {
+    HOST_ACCENT.with(std::cell::Cell::get).unwrap_or(EVORA_ACCENT)
+}
+
+/// The WCAG 2 contrast ratio of two opaque colours (sRGB relative luminance).
+pub fn contrast_ratio(a: Color32, b: Color32) -> f32 {
+    let lin = |v: u8| {
+        let c = f32::from(v) / 255.0;
+        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    };
+    let lum = |c: Color32| 0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b());
+    let (x, y) = (lum(a), lum(b));
+    let (hi, lo) = if x > y { (x, y) } else { (y, x) };
+    (hi + 0.05) / (lo + 0.05)
+}
+
+/// `c` moved towards `toward` in 1/64 steps until it holds `ratio` against every surface of
+/// `surfaces`; `toward` itself when no step does.
+fn reach(c: Color32, toward: Color32, surfaces: &[Color32], ratio: f32) -> Color32 {
+    let mix = |t: f32| {
+        let m = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round().clamp(0.0, 255.0) as u8;
+        Color32::from_rgb(m(c.r(), toward.r()), m(c.g(), toward.g()), m(c.b(), toward.b()))
+    };
+    (0..=64u8).map(|i| mix(f32::from(i) / 64.0)).find(|m| surfaces.iter().all(|s| contrast_ratio(*m, *s) >= ratio)).unwrap_or(toward)
 }
 
 /// Register Inter (UI) and JetBrains Mono (numbers) plus named weights.

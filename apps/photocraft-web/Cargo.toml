@@ -33,6 +33,9 @@ log = { workspace = true }
 # Evora build (patch E3): the `prefs.set` command that imposes the host language. Already in
 # Cargo.lock for this crate (dev-dependency), so the lock file is unchanged.
 serde_json = { workspace = true }
+# Evora build (patch LUM-14 r2): a layer's `shmd` block, read and written back without its
+# location. Already in Cargo.lock for this crate (dev-dependency, and through photocraft-io).
+photocraft-psd = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # `wgpu` pulls egui-wgpu's defaults: WebGPU plus the WebGL2 fallback.

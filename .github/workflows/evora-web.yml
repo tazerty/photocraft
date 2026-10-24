@@ -20,7 +20,8 @@
 # du moteur parvient à la coquille (scénario « pont-panique », LUM-04), et que la politique de
 # localisation imposée par la coquille s'applique à chaque export, calques compris, en PNG, JPEG,
 # TIFF, WebP et PSD (scénario « pont-politique », LUM-14 r2, une passe par politique : none, rights,
-# all) ; ses marqueurs doivent être absents du .wasm servi.
+# all), objets dynamiques, blocs globaux, notes et blocs shmd compris (LUM-14 r3) ; ses marqueurs
+# doivent être absents du .wasm servi.
 # Chaque porte s'exécute même si une autre échoue ; le bilan échoue s'il en manque une, et l'artefact
 # n'est publié qu'après un bilan vert.
 #
@@ -486,7 +487,9 @@ jobs:
           # le faire paniquer), prouve que la panique parvient à la coquille en un seul evora:failed
           # {code: "panic"}. LUM-14 r2 : la même coquille y ajoute deux calques à XMP propre et fait
           # exporter la photo géolocalisée en cinq formats, sous chacune des trois politiques de
-          # localisation. Ce build n'est jamais empaqueté : chacun de ses marqueurs doit être présent
+          # localisation ; LUM-14 r3 : avec des objets dynamiques qui placent des fichiers
+          # géolocalisés, un bloc global que le moteur ne lit pas, une note et des blocs shmd qui
+          # tiennent plus que l'export ne garde. Ce build n'est jamais empaqueté : chacun de ses marqueurs doit être présent
           # dans son .wasm (sinon la recette ne prouve rien) et absent du .wasm servi. Même profil que
           # le build servi (cache cargo partagé), sans wasm-opt.
           smoke_dir="$RUNNER_TEMP/evora-web-smoke"
@@ -506,7 +509,7 @@ jobs:
           }
           echo "### Fumée du build evora-smoke (LUM-04, LUM-14 r2)" >> "$GITHUB_STEP_SUMMARY"
           echo >> "$GITHUB_STEP_SUMMARY"
-          for marker in evora:smoke-panic evora:smoke-export evora:smoke-layer-xmp; do
+          for marker in evora:smoke-panic evora:smoke-export evora:smoke-layer-xmp evora:smoke-placed evora:smoke-shmd; do
             smoke_hits=$(count "$smoke_dir" "$marker")
             served_hits=$(count "$EVORA_PKG_DIR" "$marker")
             echo "Marqueur \`$marker\` : $smoke_hits occurrence(s) dans le build de fumée, $served_hits dans le .wasm servi (attendu : au moins 1, puis 0)." >> "$GITHUB_STEP_SUMMARY"

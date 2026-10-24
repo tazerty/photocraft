@@ -167,6 +167,41 @@ pub enum HostEvent {
     /// with `xmp` as its own packet, the other with `xmp` in a raw `shmd` block.
     #[cfg(feature = "evora-smoke")]
     SmokeLayerXmp { id: String, xmp: String },
+    /// Smoke build only (same scenario, patch LUM-14 r3): smart objects placing these files, a
+    /// global block the engine does not read and a note, added to the active document.
+    #[cfg(feature = "evora-smoke")]
+    SmokePlaced { id: String, files: SmokeFiles },
+    /// Smoke build only (same scenario, patch LUM-14 r3): copies of the active document's bottom
+    /// layer whose `shmd` blocks hold more than the export keeps.
+    #[cfg(feature = "evora-smoke")]
+    SmokeShmd { id: String, packets: SmokePackets },
+}
+
+/// Smoke build only (patch LUM-14 r3): `evora:smoke-placed {png, jpeg, linked, other, nestedXmp}`,
+/// the files smart objects place (`linked`: the file of an imported PSD's smart object) and the
+/// XMP packet of the `.pcraft` document a smart object places.
+#[cfg(feature = "evora-smoke")]
+pub struct SmokeFiles {
+    pub png: Vec<u8>,
+    pub jpeg: Vec<u8>,
+    pub linked: Vec<u8>,
+    pub other: Vec<u8>,
+    pub nested_xmp: String,
+}
+
+/// Smoke build only (patch LUM-14 r3): `evora:smoke-shmd {clean, second, twice, raw, item,
+/// witness}`, the XMP packets (or data) of the `shmd` blocks to build: a packet with the rights
+/// alone, a located packet in a second `cust` item, a second packet in one `cust` item, a packet
+/// that is not text, the data of an item that is not `cust`, and the located packet of a block
+/// the export rebuilds (with its `layerTime`).
+#[cfg(feature = "evora-smoke")]
+pub struct SmokePackets {
+    pub clean: String,
+    pub second: String,
+    pub twice: String,
+    pub raw: String,
+    pub item: String,
+    pub witness: String,
 }
 
 /// A save handed to the host, bound to its document at the end of the frame (`host_docs`).
@@ -521,7 +556,7 @@ impl Bridge {
             "evora:font" => Some("font.inject"),
             // Smoke build only (patch LUM-14 r2): the export scenario of the CI.
             #[cfg(feature = "evora-smoke")]
-            "evora:smoke-export" | "evora:smoke-layer-xmp" => None,
+            "evora:smoke-export" | "evora:smoke-layer-xmp" | "evora:smoke-placed" | "evora:smoke-shmd" => None,
             // The host's answer to an `evora:export` (patch LUM-03) or the close of a picker
             // (patch LUM-02): read only when it answers one of them (`on_ack`), each sent only
             // with its capability effective; any other is ignored.
@@ -571,7 +606,7 @@ impl Bridge {
             "evora:file" => self.on_file(re.as_deref(), &payload),
             "evora:font" => self.on_font(&id, &payload),
             #[cfg(feature = "evora-smoke")]
-            "evora:smoke-export" | "evora:smoke-layer-xmp" => self.on_smoke(&kind, &id, &payload),
+            "evora:smoke-export" | "evora:smoke-layer-xmp" | "evora:smoke-placed" | "evora:smoke-shmd" => self.on_smoke(&kind, &id, &payload),
             _ => {}
         }
     }
@@ -781,15 +816,41 @@ impl Bridge {
     }
 
     /// Smoke build only (patch LUM-14 r2, scenario pont-politique): `evora:smoke-export {ext}`, one of
-    /// the formats the scenario reads; `evora:smoke-layer-xmp {xmp}`.
+    /// the formats the scenario reads; `evora:smoke-layer-xmp {xmp}`; patch LUM-14 r3:
+    /// `evora:smoke-placed` (`SmokeFiles`, each file an ArrayBuffer) and `evora:smoke-shmd`
+    /// (`SmokePackets`, strings).
     #[cfg(feature = "evora-smoke")]
     fn on_smoke(&self, kind: &str, id: &str, p: &JsValue) {
-        if kind == "evora:smoke-export" {
-            if let Some(ext) = get(p, "ext").as_string().filter(|e| matches!(e.as_str(), "png" | "jpg" | "tif" | "webp" | "psd")) {
-                self.push(HostEvent::SmokeExport { id: id.to_owned(), ext });
+        let text = |key: &str| get(p, key).as_string();
+        let bytes = |key: &str| {
+            let v = get(p, key);
+            v.is_instance_of::<js_sys::ArrayBuffer>().then(|| js_sys::Uint8Array::new(&v).to_vec())
+        };
+        match kind {
+            "evora:smoke-export" => {
+                if let Some(ext) = text("ext").filter(|e| matches!(e.as_str(), "png" | "jpg" | "tif" | "webp" | "psd")) {
+                    self.push(HostEvent::SmokeExport { id: id.to_owned(), ext });
+                }
             }
-        } else if let Some(xmp) = get(p, "xmp").as_string() {
-            self.push(HostEvent::SmokeLayerXmp { id: id.to_owned(), xmp });
+            "evora:smoke-layer-xmp" => {
+                if let Some(xmp) = text("xmp") {
+                    self.push(HostEvent::SmokeLayerXmp { id: id.to_owned(), xmp });
+                }
+            }
+            "evora:smoke-placed" => {
+                if let (Some(png), Some(jpeg), Some(linked), Some(other), Some(nested_xmp)) =
+                    (bytes("png"), bytes("jpeg"), bytes("linked"), bytes("other"), text("nestedXmp"))
+                {
+                    self.push(HostEvent::SmokePlaced { id: id.to_owned(), files: SmokeFiles { png, jpeg, linked, other, nested_xmp } });
+                }
+            }
+            _ => {
+                if let (Some(clean), Some(second), Some(twice), Some(raw), Some(item), Some(witness)) =
+                    (text("clean"), text("second"), text("twice"), text("raw"), text("item"), text("witness"))
+                {
+                    self.push(HostEvent::SmokeShmd { id: id.to_owned(), packets: SmokePackets { clean, second, twice, raw, item, witness } });
+                }
+            }
         }
     }
 

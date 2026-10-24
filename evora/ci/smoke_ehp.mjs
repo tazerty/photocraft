@@ -954,7 +954,9 @@ export function harnessJs() {
         const id = () => { const n = u32(); if (!n) return four(); p += n; return t.slice(p - n, p); };
         const f64 = () => { const v = dv.getFloat64(p, le); p += 8; return v; };
         try {
-          p += 2 * u32();
+          // Le nom (UTF-16) : sa longueur lue AVANT d'avancer (« p += 2 * u32() » relirait l'ancien p).
+          const nameUnits = u32();
+          p += 2 * nameUnits;
           id();
           const size = {};
           for (let i = 0, n = u32(); i < n && i < 8; i++) {

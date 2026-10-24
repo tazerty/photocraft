@@ -47,6 +47,24 @@
 //     connexion bloque la suppression de la base, puis l'est une fois la base supprimée, avec un
 //     stockage vide juste après l'accusé (restes hors espace de noms compris) ; plus aucune
 //     écriture ensuite ; OPFS et Cache Storage restent vides ;
+//   - menus masqués (LUM-09) : diag.menus liste les articles masqués (masked), dont un
+//     échantillon attendu, aucun parmi les articles vivants ; Ctrl+P (Fichier › Imprimer, masqué)
+//     n'ouvre aucun dialogue ;
+//   - polices (LUM-11) : evora:font d'une police servie (TrueType ou OpenType du dossier des polices
+//     de la CI) accusé positivement, ses familles listées par diag.stats (fonts) ; des octets qui ne
+//     sont pas une police refusés (invalid_content) ;
+//   - sortie clavier (LUM-13) : F6 retenue par le moteur (ni le canevas ni le navigateur ne la
+//     voient) et un seul evora:focus-out {} ; Maj+F6 laissée passer, sans message ;
+//   - localisation (LUM-14) : une photo géolocalisée (EXIF avec répertoire GPS, XMP avec propriétés
+//     GPS et ville) exportée avec Métadonnées « toutes » (choix mémorisé posé avant le démarrage)
+//     sort sans répertoire GPS, sans les valeurs de latitude, sans propriété GPS ni ville dans son
+//     XMP, mais avec la marque de l'appareil (EXIF) et les droits (XMP) : ce que le témoin intact
+//     prouve, c'est que les métadonnées sont lues et réécrites ;
+//   - sélecteur de la coquille (LUM-02) : Fichier › Placer (evora:command file.placeEmbedded)
+//     demande evora:pick {purpose: "import"}, le fichier remis est placé (evora:dirty true) ;
+//     Ctrl+O (Fichier › Ouvrir) demande evora:pick {purpose: "open", multiple}, le fichier remis
+//     s'ouvre (un document de plus) ; annulé, rien ne s'ouvre ; un nouveau Ctrl+O redemande
+//     (aucun sélecteur resté ouvert) ;
 //   - aucune enveloppe hors norme (champ inconnu, version, type, ids, charge utile) et aucun
 //     evora:failed ; chaque capacité annoncée est exercée par ce scénario.
 // Chaque contrôle porte une étiquette [ehp:…] dans la liste des problèmes du rapport.
@@ -66,6 +84,8 @@
 //     evora-host.json : seuls MUET_REDS doivent rougir ;
 //   - « ecoutes » (scénario pont-documents, smoke_docs.mjs) : les écoutes versionchange et storage
 //     des documents moteur sont neutralisées : seuls DOCS_REDS doivent rougir, chacun à son contrôle.
+import fs from 'node:fs';
+import path from 'node:path';
 import zlib from 'node:zlib';
 
 export const SCENARIO = 'pont-ehp';
@@ -82,6 +102,10 @@ const LOCAL_REF = '01JZZSMKEDCQMENTREF0000003';
 // LUM-12 : docRef des documents neufs demandés par la coquille (créé, puis annulé).
 const NEW_REF = '01JZZSMKEDCQMENTREF0000004';
 const CANCEL_REF = '01JZZSMKEDCQMENTREF0000005';
+// LUM-14 : docRef de la photo géolocalisée ; LUM-02 : uid Drive (fictif) des fichiers remis par le
+// sélecteur de la coquille.
+const GPS_REF = '01JZZSMKEDCQMENTREF0000006';
+const PICK_UID = '01JZZSMKEDCQMENTREF0000007';
 const MIME_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
 const STORAGE_NS = 'ab'.repeat(32);
 // E5 : un autre compte du même navigateur, et un autre moteur servi par la même origine.
@@ -94,12 +118,18 @@ const PRESETS = 'photocraft.presets';
 // pour la petite image et son document de travail.
 const BENCH_MAX_BYTES = 8 * 1024 * 1024;
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+// Vocabulaire du §4.2 et ui.focus-out de l'amendement A-19 (1.1 en projet, §7.9).
 const CAPABILITY_NAMES = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 'doc.multi', 'doc.request-save',
   'export.drive', 'media.need', 'media.ranges', 'pick.drive', 'command', 'storage.ns', 'storage.memory',
-  'storage.purge', 'live.lang', 'live.theme', 'font.inject', 'author'];
+  'storage.purge', 'live.lang', 'live.theme', 'font.inject', 'author', 'ui.focus-out'];
 // Capacités que ce scénario exerce : le moteur ne doit en annoncer aucune autre.
-const EXERCISED = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 'doc.request-save', 'export.drive', 'storage.ns', 'storage.purge',
-  'live.lang', 'live.theme', 'command'];
+const EXERCISED = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 'doc.request-save', 'export.drive', 'pick.drive', 'storage.ns',
+  'storage.purge', 'live.lang', 'live.theme', 'command', 'font.inject', 'ui.focus-out'];
+// LUM-09 : articles que le build hôte doit masquer (échantillon : impression, lots, script qui lit
+// le disque, montage vidéo, Quitter), tous présents dans l'arbre complet des menus.
+const MASKED_SAMPLE = ['file.print', 'file.automate.batch', 'file.scripts.loadFilesIntoStack', 'window.panel.timeline', 'file.exit'];
+// LUM-02 : motif d'un élément de accept (§4.4).
+const ACCEPT_RE = /^(\.[a-z0-9]+|[a-z0-9.+-]+\/[a-z0-9.+*-]+)$/;
 // LUM-10 : commandes de la liste blanche du moteur qui ouvrent un dialogue, et commandes réelles du
 // moteur hors liste (sans dialogue ni effet sur le document).
 const DIALOG_COMMANDS = ['file.new', 'file.export.exportAs', 'edit.keyboardShortcuts'];
@@ -145,6 +175,11 @@ export const BANC_SABOTAGES = [
   { tag: 'ehp:local-doc-first-save', kind: 'message' },
   { tag: 'ehp:open-new', kind: 'message' },
   { tag: 'ehp:open-new-cancel', kind: 'message' },
+  { tag: 'ehp:menus-masked', kind: 'message' },
+  { tag: 'ehp:font-inject', kind: 'message' },
+  { tag: 'ehp:focus-out', kind: 'message' },
+  { tag: 'ehp:export-no-gps', kind: 'message' },
+  { tag: 'ehp:pick', kind: 'message' },
 ];
 // Témoin « moteur » (removeItem, clear et deleteDatabase sans effet) : les rouges attendus, chacun à
 // son contrôle. Les restes non effacés font aussi rougir les témoins de purge et la réécriture : ce
@@ -260,8 +295,9 @@ export function muteProblems({ started, last, storage, parentMessages, served, w
   return out;
 }
 
-// Une image PNG RGBA de 32 × 32 (indigo), écrite ici : aucun fichier binaire dans le dépôt.
-function png() {
+// Une image PNG RGBA de 32 × 32 (indigo), écrite ici : aucun fichier binaire dans le dépôt. `extra` :
+// blocs ([type, données]) placés avant les pixels (eXIf, iTXt).
+function pngFile(extra = []) {
   const crcTable = Array.from({ length: 256 }, (_, n) => {
     let c = n;
     for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
@@ -291,7 +327,79 @@ function png() {
     for (let x = 0; x < size; x++) rows.push(Buffer.from([0x4f, 0x46, 0xe5, 0xff]));
   }
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr),
+    ...extra.map(([type, data]) => chunk(type, data)),
     chunk('IDAT', zlib.deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0))]);
+}
+
+function png() {
+  return pngFile();
+}
+
+// LUM-14 : l'EXIF d'une photo géolocalisée (TIFF petit-boutiste) : IFD0 avec la marque de
+// l'appareil (Make, témoin intact) et le pointeur GPS ; répertoire GPS avec la version, la
+// référence N et la latitude 12/1, 34/1, 56/1 (24 octets hors des entrées : le banc cherche ce
+// reste après l'export).
+export const GPS_LATITUDE = [12, 1, 34, 1, 56, 1];
+export const EXIF_MAKE = 'EvoraSmoke';
+function exifFixture() {
+  const make = Buffer.from(`${EXIF_MAKE}\0`, 'latin1');
+  const out = Buffer.alloc(116);
+  out.write('II', 0, 'latin1');
+  out.writeUInt16LE(42, 2);
+  out.writeUInt32LE(8, 4);
+  // IFD0 à 8 : deux entrées, puis le prochain répertoire (aucun) ; fin à 38.
+  out.writeUInt16LE(2, 8);
+  out.writeUInt16LE(0x010f, 10); out.writeUInt16LE(2, 12); out.writeUInt32LE(make.length, 14); out.writeUInt32LE(38, 18);
+  out.writeUInt16LE(0x8825, 22); out.writeUInt16LE(4, 24); out.writeUInt32LE(1, 26); out.writeUInt32LE(50, 30);
+  out.writeUInt32LE(0, 34);
+  make.copy(out, 38);
+  // Répertoire GPS à 50 : trois entrées, puis le prochain (aucun) ; fin à 92 ; latitude à 92.
+  out.writeUInt16LE(3, 50);
+  out.writeUInt16LE(0, 52); out.writeUInt16LE(1, 54); out.writeUInt32LE(4, 56); out.set([2, 3, 0, 0], 60);
+  out.writeUInt16LE(1, 64); out.writeUInt16LE(2, 66); out.writeUInt32LE(2, 68); out.write('N', 72, 'latin1');
+  out.writeUInt16LE(2, 76); out.writeUInt16LE(5, 78); out.writeUInt32LE(3, 80); out.writeUInt32LE(92, 84);
+  out.writeUInt32LE(0, 88);
+  GPS_LATITUDE.forEach((w, k) => out.writeUInt32LE(w, 92 + 4 * k));
+  return out;
+}
+
+// LUM-14 : le XMP de la même photo : latitude (attribut), ville (attribut), longitude et version
+// GPS (éléments, l'une avec un contenu imbriqué), altitude (élément vide), puis les droits (témoin
+// intact).
+export const XMP_RIGHTS = 'EvoraSmokeRights';
+const XMP_FIXTURE = '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/">'
+  + '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about=""'
+  + ' xmlns:exif="http://ns.adobe.com/exif/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/"'
+  + ' xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/" exif:GPSLatitude="12,34.56N" photoshop:City="Papeete">'
+  + '<exif:GPSLongitude>56,7.89E</exif:GPSLongitude><exif:GPSVersionID><rdf:Seq><rdf:li>2</rdf:li></rdf:Seq></exif:GPSVersionID>'
+  + `<exif:GPSAltitude/><dc:rights><rdf:Alt><rdf:li xml:lang="x-default">${XMP_RIGHTS}</rdf:li></rdf:Alt></dc:rights>`
+  + '</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>';
+function itxt(keyword, text) {
+  return Buffer.concat([Buffer.from(keyword, 'latin1'), Buffer.from([0, 0, 0, 0, 0]), Buffer.from(text, 'utf8')]);
+}
+
+// La photo géolocalisée (LUM-14).
+function geoPng() {
+  return pngFile([['eXIf', exifFixture()], ['iTXt', itxt('XML:com.adobe.xmp', XMP_FIXTURE)]]);
+}
+
+// LUM-11 : la plus petite police TrueType ou OpenType du dossier des polices servies (quatrième
+// argument de smoke.mjs, fonts/manifest.txt de craft-fonts), ou null.
+function benchFont() {
+  const dir = process.argv[5];
+  if (!dir) return null;
+  try {
+    const manifest = fs.readFileSync(path.join(dir, 'fonts/manifest.txt'), 'utf8');
+    const rows = manifest.split('\n').map((l) => l.split(' | ').map((c) => c.trim()))
+      .filter((c) => c.length >= 3 && c[0] && !c[0].startsWith('#') && /\.(ttf|otf)$/i.test(c[2]) && c[2].startsWith('fonts/') && !c[2].includes('..'));
+    const files = rows.map((c) => ({ family: c[0], file: path.join(dir, c[2]), format: /\.otf$/i.test(c[2]) ? 'otf' : 'ttf' }))
+      .filter((f) => fs.existsSync(f.file)).map((f) => ({ ...f, size: fs.statSync(f.file).size })).sort((a, b) => a.size - b.size);
+    const font = files[0];
+    if (!font || font.size > BENCH_MAX_BYTES) return null;
+    return { family: font.family, format: font.format, b64: fs.readFileSync(font.file).toString('base64') };
+  } catch {
+    return null;
+  }
 }
 
 // Posé dans le document moteur avant son démarrage (Page.addScriptToEvaluateOnNewDocument).
@@ -302,6 +410,9 @@ export const SEED_JS = `(() => {
     localStorage.setItem('${PREFS}', '{}');
     localStorage.setItem('${OTHER_NS}:${PREFS}', '{}');
     localStorage.setItem('${FOREIGN_KEY}', 'garde');
+    // LUM-14 : un compte qui a choisi Métadonnées « toutes » dans Exporter sous (choix mémorisé par
+    // le moteur, sous son espace de noms) : la localisation doit sortir quand même.
+    localStorage.setItem('${STORAGE_NS}:${PREFS}', JSON.stringify({ dialogs: { 'file.export.exportAs': { metadata: 'all' } } }));
   } catch (e) { /* stockage refusé : les contrôles le diront */ }
   for (const name of ['${PRESETS}', '${OTHER_NS}:${PRESETS}', '${FOREIGN_DB}']) {
     const r = indexedDB.open(name, 1);
@@ -367,6 +478,8 @@ export const WITNESS_JS = `(() => {
 // aux témoins. Les octets sont résumés (taille, quatre premiers octets) pour le journal.
 export function harnessJs() {
   const fixture = png().toString('base64');
+  const geo = geoPng().toString('base64');
+  const font = benchFont();
   return `(() => {
   const engine = document.getElementById('engine');
   const ENGINE = new URL(engine.src).origin;
@@ -386,6 +499,65 @@ export function harnessJs() {
     if (ArrayBuffer.isView(x)) return { $view: x.constructor.name };
     return x;
   }));
+  // LUM-14 : ce qu'un PNG exporté garde de ses métadonnées (blocs eXIf et iTXt XMP lus ici).
+  const latin1 = (a) => Array.from(a, (c) => String.fromCharCode(c)).join('');
+  const tiffTags = (d) => {
+    if (d.length < 8) return { le: true, tags: null };
+    const dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
+    const le = d[0] === 0x49;
+    const ifd = dv.getUint32(4, le);
+    if (ifd + 2 > d.length) return { le, tags: null };
+    const n = dv.getUint16(ifd, le);
+    const tags = [];
+    for (let i = 0; i < n && ifd + 4 + 12 * i <= d.length; i++) tags.push(dv.getUint16(ifd + 2 + 12 * i, le));
+    return { le, tags };
+  };
+  const latitude = (d, le) => {
+    const pat = new Uint8Array(24);
+    const pv = new DataView(pat.buffer);
+    ${JSON.stringify(GPS_LATITUDE)}.forEach((w, k) => pv.setUint32(4 * k, w, le));
+    for (let i = 0; i + 24 <= d.length; i++) {
+      let same = true;
+      for (let j = 0; j < 24 && same; j++) same = d[i + j] === pat[j];
+      if (same) return true;
+    }
+    return false;
+  };
+  const pngMeta = (buf) => {
+    const b = new Uint8Array(buf);
+    const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    if (b.length < 8 || sig.some((v, i) => b[i] !== v)) return null;
+    const dv = new DataView(buf);
+    const out = { exif: false, make: false, gpsTag: false, latitude: false, xmp: false, compressed: false, rights: false, location: false };
+    let at = 8;
+    while (at + 12 <= b.length) {
+      const len = dv.getUint32(at);
+      const type = latin1(b.subarray(at + 4, at + 8));
+      const data = b.subarray(at + 8, Math.min(b.length, at + 8 + len));
+      if (type === 'eXIf') {
+        const t = tiffTags(data);
+        out.exif = true;
+        out.make = !!t.tags && t.tags.includes(0x010f) && latin1(data).includes(${JSON.stringify(EXIF_MAKE)});
+        out.gpsTag = !t.tags || t.tags.includes(0x8825);
+        out.latitude = latitude(data, t.le);
+      } else if (type === 'iTXt') {
+        const k = data.indexOf(0);
+        if (k > 0 && latin1(data.subarray(0, k)) === 'XML:com.adobe.xmp') {
+          out.xmp = true;
+          if (data[k + 1]) out.compressed = true;
+          else {
+            let q = data.indexOf(0, k + 3) + 1;
+            q = data.indexOf(0, q) + 1;
+            const text = new TextDecoder().decode(data.subarray(q));
+            out.rights = text.includes(${JSON.stringify(XMP_RIGHTS)});
+            out.location = /GPS|Papeete/.test(text);
+          }
+        }
+      }
+      at += 12 + len;
+    }
+    return out;
+  };
   const log = [];
   const sent = [];
   addEventListener('message', (e) => {
@@ -394,6 +566,9 @@ export function harnessJs() {
     const entry = { at: Math.round(performance.now()), origin: e.origin, fromEngine: e.source === engine.contentWindow, plain,
       keys: plain ? Object.keys(d) : null };
     try { entry.msg = plain ? summarize(d) : String(d).slice(0, 200); } catch (err) { entry.msg = 'illisible'; }
+    if (plain && d.type === 'evora:export' && d.payload && d.payload.bytes instanceof ArrayBuffer) {
+      try { entry.png = pngMeta(d.payload.bytes); } catch (err) { entry.png = 'illisible'; }
+    }
     log.push(entry);
   });
   window.__ehp = {
@@ -422,6 +597,9 @@ export function harnessJs() {
       return id;
     },
     png() { return Uint8Array.from(atob('${fixture}'), (c) => c.charCodeAt(0)).buffer; },
+    geoPng() { return Uint8Array.from(atob('${geo}'), (c) => c.charCodeAt(0)).buffer; },
+    fontInfo() { return ${JSON.stringify(font ? { family: font.family, format: font.format } : null)}; },
+    font() { return Uint8Array.from(atob('${font ? font.b64 : ''}'), (c) => c.charCodeAt(0)).buffer; },
   };
 })();`;
 }
@@ -445,6 +623,18 @@ const keyPress = (key, code, mods = {}) => `(() => {
   c.dispatchEvent(new KeyboardEvent('keydown', init));
   c.dispatchEvent(new KeyboardEvent('keyup', init));
   return document.activeElement === c;
+})()`;
+
+// Une touche vers le canvas d'eframe ; rend vrai si le moteur l'a retenue (preventDefault).
+const keyDown = (key, code, mods = {}) => `(() => {
+  const c = document.getElementById('photocraft_canvas');
+  c.focus();
+  const init = { key: ${JSON.stringify(key)}, code: ${JSON.stringify(code)}, ctrlKey: ${!!mods.ctrl}, shiftKey: ${!!mods.shift},
+    altKey: ${!!mods.alt}, bubbles: true, cancelable: true };
+  const down = new KeyboardEvent('keydown', init);
+  c.dispatchEvent(down);
+  c.dispatchEvent(new KeyboardEvent('keyup', init));
+  return down.defaultPrevented;
 })()`;
 
 function initPayload(capabilities) {
@@ -709,7 +899,155 @@ export class EhpBench {
     await this.exports();
     await this.openNew();
     await this.commands();
+    await this.menusMasked();
+    await this.fonts();
+    await this.focusOut();
+    await this.exportNoGps();
+    // En dernier : le sélecteur ouvre un onglet du moteur, qui devient le document actif.
+    await this.pick();
     await this.storagePhases(st);
+  }
+
+  // LUM-09 : diag.menus (relevé par commands()) liste les articles masqués, jugés par verify() ;
+  // Ctrl+P (Fichier › Imprimer, masqué) n'ouvre aucun dialogue.
+  async menusMasked() {
+    const before = await this.stats();
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await this.evaluate(this.frame(), shortcut('p'), true);
+      await sleep(1000);
+    }
+    const after = await this.stats();
+    if (!before || !after || after.dialogs !== before.dialogs) {
+      this.fail('menus-masked', `Ctrl+P (Fichier › Imprimer, masqué) : dialogues ${before && before.dialogs} puis ${after && after.dialogs}`);
+      if (after && after.dialogs > 0) await this.evaluate(this.frame(), keyPress('Escape', 'Escape'), true);
+    }
+    if (this.ids.menus) {
+      await this.sabotage('menus-masked', 'diag.menus fabriqué, Fichier › Imprimer vivant et rien de masqué',
+        `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(this.ids.menus)}, payload: { ok: true, result: { live: ['file.print'], enabled: [], masked: [] } } }`);
+    }
+  }
+
+  // LUM-11 : une police servie, puis des octets qui n'en sont pas une ; les accusés sont jugés par
+  // verify() ; diag.stats liste les familles enregistrées.
+  async fonts() {
+    const info = await this.evaluate(this.page, '__ehp.fontInfo()');
+    if (!info) {
+      this.fail('font-inject', 'aucune police TrueType ou OpenType lisible dans le dossier des polices servies (fonts/manifest.txt)');
+      return;
+    }
+    this.ids.font = await this.send('evora:font', `{ family: ${JSON.stringify(info.family)}, format: ${JSON.stringify(info.format)}, bytes: __ehp.font() }`);
+    this.ids.fontBad = await this.send('evora:font', `{ family: 'Evora Banc Illisible', format: 'ttf', bytes: __ehp.png() }`);
+    for (const key of ['font', 'fontBad']) {
+      await this.waitEngine((m) => m.type === 'evora:ack' && m.re === this.ids[key] && !this.injectedIds.includes(m.id), 15000);
+    }
+    const r = await this.stats();
+    this.log(`[ehp] police ${info.family} (${info.format}) : familles enregistrées ${JSON.stringify(r && r.fonts)}`);
+    if (!r || !Array.isArray(r.fonts) || r.fonts.length < 1) this.fail('font-inject', `familles enregistrées (diag.stats) après evora:font : ${JSON.stringify(r && r.fonts)}`);
+    await this.sabotage('font-inject', 'accusé positif fabriqué de la police illisible',
+      `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(this.ids.fontBad)}, payload: { ok: true } }`);
+  }
+
+  // LUM-13 : F6 retenue, un seul evora:focus-out ; Maj+F6 laissée passer, sans message.
+  async focusOut() {
+    const mark = (await this.refresh()).log.length;
+    const held = await this.evaluate(this.frame(), keyDown('F6', 'F6'), true);
+    const out = await this.waitEngine((m) => m.type === 'evora:focus-out' && !this.injectedIds.includes(m.id), 5000, mark);
+    this.ids.focusOut = out ? out.msg.id : null;
+    if (!out) this.fail('focus-out', 'F6 avec ui.focus-out effective : aucun evora:focus-out');
+    if (!held) this.fail('focus-out', 'F6 non retenue par le moteur : le canevas et le navigateur la reçoivent');
+    const mark2 = (await this.refresh()).log.length;
+    const shifted = await this.evaluate(this.frame(), keyDown('F6', 'F6', { shift: true }), true);
+    await sleep(1500);
+    await this.refresh();
+    const extra = this.state.log.slice(mark2).filter((e) => e.fromEngine && e.plain && e.msg.type === 'evora:focus-out' && !this.injectedIds.includes(e.msg.id));
+    if (shifted || extra.length) this.fail('focus-out', `Maj+F6 retenue (${shifted}) ou suivie d'un evora:focus-out (${extra.map((e) => e.msg.id).join(', ') || 'aucun'})`);
+    await this.sabotage('focus-out', 'evora:focus-out à charge utile non vide', `{ v: 1, type: 'evora:focus-out', payload: { touche: 'F6' } }`);
+  }
+
+  // LUM-14 : la photo géolocalisée, ouverte par la coquille puis exportée (Exporter sous, Entrée) ;
+  // les métadonnées du PNG reçu sont jugées par verify().
+  async exportNoGps() {
+    const id = await this.send('evora:open', `{ docRef: ${JSON.stringify(GPS_REF)}, name: 'evora-geo.png', bytes: __ehp.geoPng() }`);
+    const ack = await this.waitEngine((m) => m.type === 'evora:ack' && m.re === id && !this.injectedIds.includes(m.id), 30000);
+    if (!ack || ack.msg.payload.ok !== true) {
+      this.fail('export-no-gps', `ouverture de la photo géolocalisée : ${JSON.stringify(ack && ack.msg)}`);
+      return;
+    }
+    const out = await this.exportAs('export-no-gps');
+    if (out) {
+      this.ids.gpsExport = out.msg.id;
+      await this.send('evora:ack', '{ ok: true }', { re: out.msg.id });
+    }
+    await this.sabotage('export-no-gps', 'evora:export d\'une photo encore géolocalisée',
+      `{ v: 1, type: 'evora:export', payload: { docRef: ${JSON.stringify(GPS_REF)}, name: 'evora-geo.png', mime: 'image/png', bytes: Uint8Array.from(atob('${geoPng().toString('base64')}'), (c) => c.charCodeAt(0)).buffer } }`);
+  }
+
+  // LUM-02 : le sélecteur de la coquille, pour Placer (import), Ouvrir (open), une annulation, et
+  // un nouveau Ouvrir après l'annulation (aucun sélecteur resté ouvert). Les evora:pick sont jugés
+  // par verify() (schéma) ; ici, leur objet et l'effet des fichiers remis.
+  async pick() {
+    const picked = new Set();
+    const nextPick = (m) => m.type === 'evora:pick' && !picked.has(m.id) && !this.injectedIds.includes(m.id);
+    // Placer : evora:command file.placeEmbedded, puis le fichier de la coquille placé sur la photo.
+    const mark = (await this.refresh()).log.length;
+    const placeAck = await this.command('file.placeEmbedded');
+    const imp = await this.waitEngine(nextPick, 8000, mark);
+    if (!placeAck || placeAck.ok !== true || !imp) {
+      this.fail('pick', `Fichier › Placer : accusé ${JSON.stringify(placeAck)}, evora:pick ${JSON.stringify(imp && imp.msg)}`);
+    } else {
+      picked.add(imp.msg.id);
+      const p = imp.msg.payload || {};
+      if (p.purpose !== 'import' || p.multiple !== false || !Array.isArray(p.accept) || !p.accept.includes('image/*')) {
+        this.fail('pick', `evora:pick de Fichier › Placer inattendu (import, un fichier, image/*) : ${JSON.stringify(p)}`);
+      }
+      const at = (await this.refresh()).log.length;
+      await this.send('evora:file', `{ path: '/evora/${PICK_UID}/evora-place.png', name: 'evora-place.png', bytes: __ehp.png() }`, { re: imp.msg.id });
+      await this.send('evora:ack', '{ ok: true }', { re: imp.msg.id });
+      const placed = await this.waitEngine((m) => m.type === 'evora:dirty' && m.payload.docRef === GPS_REF && m.payload.dirty === true && !this.injectedIds.includes(m.id), 10000, at);
+      if (!placed) this.fail('pick', 'le fichier remis par la coquille n\'a pas été placé (aucun evora:dirty true de la photo)');
+      // Transformation manuelle du calque placé : validée.
+      await this.evaluate(this.frame(), keyPress('Enter', 'Enter'), true);
+      await sleep(800);
+    }
+    // Ouvrir : Ctrl+O, puis le fichier de la coquille ouvert dans un onglet du moteur.
+    const before = await this.stats();
+    const open = await this.press('o', nextPick, 'evora:pick (Ctrl+O)');
+    if (!open) this.fail('pick', 'aucun evora:pick après Ctrl+O (Fichier › Ouvrir)');
+    else {
+      picked.add(open.msg.id);
+      const p = open.msg.payload || {};
+      if (p.purpose !== 'open' || p.multiple !== true || !Array.isArray(p.accept) || !p.accept.includes('.pcraft') || !p.accept.includes('image/*')) {
+        this.fail('pick', `evora:pick de Fichier › Ouvrir inattendu (open, plusieurs, .pcraft et image/*) : ${JSON.stringify(p)}`);
+      }
+      await this.send('evora:file', `{ path: '/evora/${PICK_UID}/evora-ouvert.png', name: 'evora-ouvert.png', bytes: __ehp.png() }`, { re: open.msg.id });
+      await this.send('evora:ack', '{ ok: true }', { re: open.msg.id });
+      let r = null;
+      const end = Date.now() + 10000;
+      do {
+        await sleep(500);
+        r = await this.stats();
+      } while (Date.now() < end && !(r && before && r.documents === before.documents + 1));
+      if (!before || !r || r.documents !== before.documents + 1) {
+        this.fail('pick', `le fichier remis par la coquille ne s'est pas ouvert : ${before && before.documents} document(s) puis ${r && r.documents}`);
+      }
+    }
+    // Annulation, puis un nouveau sélecteur : rien ne s'ouvre, et rien n'est resté ouvert.
+    for (const step of ['annulé', 'après l\'annulation']) {
+      const was = await this.stats();
+      const again = await this.press('o', nextPick, `evora:pick (Ctrl+O, ${step})`);
+      if (!again) {
+        this.fail('pick', `aucun evora:pick après Ctrl+O (${step})`);
+        continue;
+      }
+      picked.add(again.msg.id);
+      await this.send('evora:ack', `{ ok: false, code: 'cancelled' }`, { re: again.msg.id });
+      await sleep(1500);
+      const now = await this.stats();
+      if (!was || !now || now.documents !== was.documents || now.dialogs !== was.dialogs) {
+        this.fail('pick', `après un sélecteur annulé (${step}), diag.stats : ${JSON.stringify(now)} (avant : ${was && was.documents} document(s), ${was && was.dialogs} dialogue(s))`);
+      }
+    }
+    await this.sabotage('pick', 'evora:pick hors schéma (objet inconnu, accept vide)', `{ v: 1, type: 'evora:pick', payload: { purpose: 'ouvrir', accept: [], multiple: true } }`);
   }
 
   // LUM-04 : accusé d'enregistrement (doc.saved-ack). Après un refus (conflit) et après un accusé
@@ -992,6 +1330,7 @@ export class EhpBench {
       return;
     }
     await this.command('diag.menus');
+    this.ids.menus = this.ids.lastCommand;
     for (const command of DIALOG_COMMANDS) {
       const ack = await this.command(command);
       // Accusé absent ou négatif : verify() le dit.
@@ -1046,7 +1385,8 @@ export class EhpBench {
     if (c.command === 'diag.stats') {
       return !!r && r.version === this.readyVersion && typeof r.renderer === 'string' && r.renderer.length > 0 && r.wasmMemoryBytes > 0
         && Number.isInteger(r.documents) && r.documents >= 1 && Number.isInteger(r.dialogs) && r.dialogs >= 0 && Array.isArray(r.open)
-        && r.open.length >= 1 && r.open.every((d) => ULID_RE.test(d.docRef) && typeof d.dirty === 'boolean' && Number.isInteger(d.revision));
+        && r.open.length >= 1 && r.open.every((d) => ULID_RE.test(d.docRef) && typeof d.dirty === 'boolean' && Number.isInteger(d.revision))
+        && Array.isArray(r.fonts) && r.fonts.every((f) => typeof f === 'string' && f.length > 0);
     }
     if (c.command === 'diag.menus') {
       return !!r && Array.isArray(r.live) && Array.isArray(r.enabled) && DIALOG_COMMANDS.every((x) => r.live.includes(x))
@@ -1265,6 +1605,18 @@ export class EhpBench {
           }
           break;
         }
+        case 'evora:pick':
+          // LUM-02 : schéma du §4.4 (accept de 1 élément au moins, distincts, au motif du §4.4).
+          if (m.re !== undefined || !only(['purpose', 'accept', 'multiple', 'forPath']) || !['open', 'import', 'relink'].includes(p.purpose)
+            || typeof p.multiple !== 'boolean' || !Array.isArray(p.accept) || !p.accept.length || new Set(p.accept).size !== p.accept.length
+            || !p.accept.every((a) => typeof a === 'string' && ACCEPT_RE.test(a)) || (p.forPath !== undefined && p.purpose !== 'relink')) {
+            this.fail('pick', `evora:pick non conforme : ${where}`);
+          }
+          break;
+        case 'evora:focus-out':
+          // LUM-13 : sans réponse, charge utile vide (A-19).
+          if (m.re !== undefined || !only([]) || Object.keys(p || {}).length) this.fail('focus-out', `evora:focus-out non conforme : ${where}`);
+          break;
         case 'evora:failed':
           if (this.panicMode) {
             if (m.re !== undefined || !only(['code']) || p.code !== 'panic') this.fail('panique', `evora:failed non conforme à la panique : ${where}`);
@@ -1338,6 +1690,51 @@ export class EhpBench {
           + `[${rs.map((e) => e.msg.id).join(', ')}], non conformes : ${bad.map((e) => `${e.msg.id} ${JSON.stringify(e.msg.payload).slice(0, 160)}`).join(' | ') || 'aucune'}`);
       }
     }
+    // LUM-09 : chaque réponse à diag.menus masque l'échantillon attendu, et rien de masqué n'est vivant.
+    if (this.ids.menus) {
+      for (const e of answered(this.ids.menus)) {
+        const r = (e.msg.payload || {}).result || {};
+        const masked = Array.isArray(r.masked) ? r.masked : null;
+        const live = Array.isArray(r.live) ? r.live : [];
+        const missing = masked ? MASKED_SAMPLE.filter((x) => !masked.includes(x)) : MASKED_SAMPLE;
+        const shown = MASKED_SAMPLE.filter((x) => live.includes(x)).concat((masked || []).filter((x) => live.includes(x)));
+        if (!masked || missing.length || shown.length) {
+          this.fail('menus-masked', `diag.menus id ${e.msg.id} : masqués absents ${missing.join(', ') || 'aucun'}, vivants à tort ${[...new Set(shown)].join(', ') || 'aucun'}`);
+        }
+      }
+    }
+    // LUM-11 : un seul accusé par evora:font, positif pour la police, invalid_content pour le reste.
+    for (const [key, want, what] of [['font', (q) => q.ok === true && q.code === undefined, 'la police servie'],
+      ['fontBad', (q) => q.ok === false && q.code === 'invalid_content', 'des octets qui ne sont pas une police']]) {
+      if (!this.ids[key]) continue;
+      const rs = answered(this.ids[key]);
+      const bad = rs.filter((e) => e.msg.type !== 'evora:ack' || !want(e.msg.payload || {}));
+      if (rs.length !== 1 || bad.length) {
+        this.fail('font-inject', `evora:font de ${what} (id ${this.ids[key]}) : ${rs.length} réponse(s) [${rs.map((e) => e.msg.id).join(', ')}], `
+          + `non conformes : ${bad.map((e) => `${e.msg.id} ${JSON.stringify(e.msg.payload)}`).join(' | ') || 'aucune'}`);
+      }
+    }
+    // LUM-13 : un seul evora:focus-out du moteur (F6) ; ceux du témoin « banc » sont jugés plus haut.
+    if (Object.prototype.hasOwnProperty.call(this.ids, 'focusOut')) {
+      const outs = msgs.filter((e) => e.msg && e.msg.type === 'evora:focus-out' && !this.injectedIds.includes(e.msg.id));
+      if (outs.length !== 1) this.fail('focus-out', `evora:focus-out reçu ${outs.length} fois (attendu : 1, après F6), ids ${outs.map((e) => e.msg.id).join(', ') || 'aucun'}`);
+    }
+    // LUM-14 : chaque evora:export de la photo géolocalisée sort sans sa localisation, avec la marque
+    // de l'appareil et les droits (le témoin intact prouve que les métadonnées ont été réécrites).
+    for (const e of msgs.filter((x) => x.msg && x.msg.type === 'evora:export' && (x.msg.payload || {}).docRef === GPS_REF)) {
+      const g = e.png;
+      const why = [];
+      if (!g || typeof g !== 'object') why.push(`PNG illisible (${JSON.stringify(g)})`);
+      else {
+        if (!g.exif || !g.make) why.push(`EXIF ou marque de l'appareil absents (exif ${g.exif}, make ${g.make}) : la recette ne prouve rien`);
+        if (g.gpsTag) why.push('pointeur GPS dans IFD0');
+        if (g.latitude) why.push('valeurs de latitude présentes');
+        if (!g.xmp || g.compressed || !g.rights) why.push(`XMP absent, compressé ou sans les droits (xmp ${g.xmp}, compressé ${g.compressed}, droits ${g.rights})`);
+        if (g.location) why.push('propriété GPS ou ville dans le XMP');
+      }
+      if (why.length) this.fail('export-no-gps', `evora:export id ${e.msg.id} de la photo géolocalisée : ${why.join(' ; ')}`);
+    }
+    if (this.ids.gpsExport === undefined && this.ids.menus) this.fail('export-no-gps', 'export de la photo géolocalisée non joué');
     const announced = this.readyCaps;
     const extra = announced.filter((x) => !EXERCISED.includes(x));
     if (extra.length) this.fail('caps', `capacités annoncées non exercées par ce scénario : ${extra.join(', ')}`);

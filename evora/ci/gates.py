@@ -22,7 +22,11 @@ Portes :
      catalogues affichés après le catalogue de surcharge (i18n/overlay.txt s'il existe), pour
      chaque langue et pour l'anglais ; bloquante si EVORA_GATE_TERMS=block, sinon mesure ;
   6. précompression et CSP (bloquante) : .br et .gz pour chaque .wasm, .js, .html ; csp-hashes.txt ;
-  7. taille (mesure) : .wasm brut, .gz, .br.
+  7. taille (bloquante, patch LUM-08) : chaque .wasm brut sous le budget Evora, variable à arbitrer
+     (D-15) lue dans EVORA_WASM_BUDGET_BYTES (variable de dépôt) ; tant qu'elle n'est pas posée, le
+     repli est le plafond par fichier de l'amont (packaging/web/package.sh, UPSTREAM_WASM_LIMIT_BYTES
+     du workflow), jamais un chiffre inventé ; sans l'un ni l'autre, la porte échoue. Mesures .gz et
+     .br à côté.
 """
 from __future__ import annotations
 
@@ -466,7 +470,21 @@ def gate_precompression_and_csp(pkg: pathlib.Path) -> None:
         summary.append("```\n" + csp.read_text(encoding="utf-8").strip() + "\n```\n")
 
 
-def measure_sizes(pkg: pathlib.Path) -> None:
+def wasm_budget() -> tuple[int | None, str]:
+    """Le budget de taille d'un .wasm (LUM-08) et sa source : la variable Evora, sinon le plafond de
+    l'amont. (None, raison) quand aucun n'est lisible."""
+    for name, source in (("EVORA_WASM_BUDGET_BYTES", "budget Evora (variable de dépôt EVORA_WASM_BUDGET_BYTES)"),
+                         ("UPSTREAM_WASM_LIMIT_BYTES", "repli : plafond par fichier de l'amont (packaging/web/package.sh), budget Evora à arbitrer (D-15)")):
+        raw = (os.environ.get(name) or "").strip()
+        if not raw:
+            continue
+        if not raw.isdigit() or int(raw) <= 0:
+            return None, f"{name} illisible : {raw!r}"
+        return int(raw), source
+    return None, "ni EVORA_WASM_BUDGET_BYTES ni UPSTREAM_WASM_LIMIT_BYTES"
+
+
+def gate_sizes(pkg: pathlib.Path) -> None:
     rows = []
     for p in sorted(pkg.glob("*.wasm")):
         raw = p.stat().st_size
@@ -474,11 +492,21 @@ def measure_sizes(pkg: pathlib.Path) -> None:
         br = p.with_name(p.name + ".br")
         rows.append({"file": p.name, "raw": raw, "gz": gz.stat().st_size if gz.exists() else None, "br": br.stat().st_size if br.exists() else None})
     total = sum(p.stat().st_size for p in pkg.rglob("*") if p.is_file() and p.suffix not in (".br", ".gz"))
-    report["sizes"] = {"wasm": rows, "siteBytes": total}
-    summary.append("### Taille (mesure, budget à arbitrer)\n")
-    summary.append("| Fichier | Brut | gzip -9 | brotli -q 11 | MiB brut |\n| --- | ---: | ---: | ---: | ---: |")
+    budget, source = wasm_budget()
+    if budget is None:
+        fail(f"porte de taille sans budget : {source}")
+    if not rows:
+        fail("porte de taille : aucun .wasm dans l'artefact")
+    over = [r for r in rows if budget is not None and r["raw"] > budget]
+    for r in over:
+        fail(f"taille : {r['file']} fait {r['raw']} octets, au-delà du budget de {budget} octets ({source})")
+    report["sizes"] = {"wasm": rows, "siteBytes": total, "budget": budget, "budgetSource": source, "over": [r["file"] for r in over]}
+    summary.append("### Taille (bloquante, LUM-08)\n")
+    summary.append(f"Budget d'un .wasm brut : {budget if budget is not None else 'absent'} octets ({source}).\n")
+    summary.append("| Fichier | Brut | gzip -9 | brotli -q 11 | MiB brut | Marge sous le budget |\n| --- | ---: | ---: | ---: | ---: | ---: |")
     for r in rows:
-        summary.append(f"| `{r['file']}` | {r['raw']} | {r['gz']} | {r['br']} | {r['raw'] / 1048576:.2f} |")
+        margin = budget - r["raw"] if budget is not None else "?"
+        summary.append(f"| `{r['file']}` | {r['raw']} | {r['gz']} | {r['br']} | {r['raw'] / 1048576:.2f} | {margin} |")
     summary.append(f"\nSite complet (hors .br/.gz) : {total} octets.\n")
 
 
@@ -493,7 +521,7 @@ def main() -> int:
     gate_emoji(entries)
     gate_terms(entries)
     gate_precompression_and_csp(pkg)
-    measure_sizes(pkg)
+    gate_sizes(pkg)
     report["failures"] = failures
     out.write_text(json.dumps(report, ensure_ascii=False, indent=1, default=sorted), encoding="utf-8")
     head = ["## Portes Evora", "", f"Échecs bloquants : {len(failures)}.", ""]

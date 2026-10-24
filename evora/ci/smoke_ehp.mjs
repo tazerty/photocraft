@@ -11,14 +11,15 @@
 //     trop, ni aux messages des deux témoins (origine non admise ; même origine, autre fenêtre) ;
 //   - l'accusé positif du vrai evora:init, puis le démarrage du moteur ;
 //   - evora:open d'une petite image PNG reçue en octets : accusé positif, puis evora:dirty false ;
-//   - une modification (Ctrl+A, Sélection › Tout) : evora:dirty true ; evora:request-save : un
+//   - une modification (Ctrl+I, Image › Réglages › Négatif ; depuis v0.15.1, Sélection › Tout ne
+//     modifie plus le document) : evora:dirty true ; evora:request-save : un
 //     evora:save conforme (re = la demande, docRef, nom .pcraft, octets non vides d'une archive zip),
 //     aucun evora:dirty false tant que la coquille n'a pas répondu (LUM-04, doc.saved-ack), puis
 //     evora:dirty false après evora:saved {ok: true} ; une seconde demande : evora:ack {ok: true,
 //     code: "clean"} ; Ctrl+S (action de l'utilisateur) : un evora:save sans re ;
 //   - accusé d'enregistrement (LUM-04) : après evora:saved {ok: false, error: "conflict"}, le
 //     document reste modifié (aucun dirty false, la demande suivante rend un evora:save) ; après un
-//     accusé positif d'un enregistrement que le document a dépassé (Ctrl+D après l'émission,
+//     accusé positif d'un enregistrement que le document a dépassé (Ctrl+I après l'émission,
 //     révision lue par diag.stats), il reste modifié de même ; la garde beforeunload du moteur se tait
 //     sous le pont ; evora:open du même docRef remplace le document modifié (un seul accusé, positif,
 //     puis dirty false, un seul document de ce docRef, demande suivante « clean ») ;
@@ -945,9 +946,9 @@ export class EhpBench {
     if (!clean) this.fail('dirty', 'evora:dirty {dirty: false} absent après l\'ouverture');
     await this.sabotage('envelope', 'evora:dirty à champ d\'enveloppe en trop', `{ v: 1, type: 'evora:dirty', payload: { dirty: false, docRef: ${JSON.stringify(DOC_REF)} }, extra: true }`);
     await this.sabotage('save-shape', 'evora:save aux octets en vue typée', `{ v: 1, type: 'evora:save', payload: { docRef: ${JSON.stringify(DOC_REF)}, name: 'evora-smoke.pcraft', saveAs: false, bytes: new Uint8Array(4) } }`);
-    const dirty = await this.press('a', (m) => m.type === 'evora:dirty' && m.payload.docRef === DOC_REF && m.payload.dirty === true, 'evora:dirty true');
+    const dirty = await this.press('i', (m) => m.type === 'evora:dirty' && m.payload.docRef === DOC_REF && m.payload.dirty === true, 'evora:dirty true');
     if (!dirty) {
-      this.fail('dirty', 'evora:dirty {dirty: true} absent après une modification (Ctrl+A)');
+      this.fail('dirty', 'evora:dirty {dirty: true} absent après une modification (Ctrl+I, Négatif)');
       return;
     }
     this.ids.request = await this.send('evora:request-save', `{ reason: 'user', docRef: ${JSON.stringify(DOC_REF)} }`);
@@ -1190,8 +1191,9 @@ export class EhpBench {
   async savedAck() {
     const dirtyTrue = (m) => m.type === 'evora:dirty' && m.payload.docRef === DOC_REF && m.payload.dirty === true;
     const fake = `{ v: 1, type: 'evora:dirty', payload: { dirty: false, docRef: ${JSON.stringify(DOC_REF)} } }`;
-    // Conflit : Ctrl+D (Sélection › Désélectionner) modifie le document ; l'enregistrement est refusé.
-    await this.press('d', dirtyTrue, 'evora:dirty true (Ctrl+D)');
+    // Conflit : Ctrl+I (Image › Réglages › Négatif) modifie le document ; l'enregistrement est refusé.
+    // Depuis v0.15.1, une sélection seule (Ctrl+A, Ctrl+D) laisse propre un document enregistré.
+    await this.press('i', dirtyTrue, 'evora:dirty true (Ctrl+I)');
     const conflict = await this.requestSave('conflit');
     if (conflict) {
       const refused = await this.saved(conflict, { ok: false, error: 'conflict' });
@@ -1201,15 +1203,15 @@ export class EhpBench {
       this.windows.push({ tag: 'saved-ack-conflict', what: 'après evora:saved {ok: false, error: "conflict"}', from: refused, to: this.ids.lastRequest, docRef: DOC_REF });
       if (next) await this.cleanAfter(next);
     }
-    // Modification tardive : Ctrl+A, demande, Ctrl+D après l'émission (révision lue par diag.stats),
+    // Modification tardive : Ctrl+I, demande, Ctrl+I après l'émission (révision lue par diag.stats),
     // puis accusé positif de l'enregistrement dépassé.
-    await this.press('a', dirtyTrue, 'evora:dirty true (Ctrl+A)');
+    await this.press('i', dirtyTrue, 'evora:dirty true (Ctrl+I)');
     const late = await this.requestSave('modification tardive');
     if (late) {
       const before = await this.revision();
       let after = before;
       for (let attempt = 1; attempt <= 3 && !(after > before); attempt++) {
-        await this.evaluate(this.frame(), shortcut('d'), true);
+        await this.evaluate(this.frame(), shortcut('i'), true);
         await sleep(700);
         after = await this.revision();
       }
@@ -1222,7 +1224,7 @@ export class EhpBench {
       if (next) await this.cleanAfter(next);
     }
     // Garde beforeunload, document modifié : sous le pont, le moteur ne retient pas la page.
-    await this.press('a', dirtyTrue, 'evora:dirty true (Ctrl+A)');
+    await this.press('i', dirtyTrue, 'evora:dirty true (Ctrl+I)');
     const stats = await this.stats();
     const modified = !!stats && stats.open.some((d) => d.docRef === DOC_REF && d.dirty === true);
     await this.sabotage('beforeunload', 'garde beforeunload posée dans le document moteur',

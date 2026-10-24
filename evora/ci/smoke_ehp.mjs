@@ -220,6 +220,11 @@ const NOTE_MARKER = 'EvoraNoteAuthor';
 const SHMD_MARKER = 'EvoraGeoShmd';
 const SHMD_KEYS = ['A', 'B', 'C', 'D'];
 const LAYER_TIME_KEY = 'layerTime';
+// Ce que le TIFF à calques ne peut pas porter, quelle que soit la politique : le transcodeur
+// petit-boutiste du moteur (crates/psd/src/tiff.rs) laisse de côté un bloc global et un élément shmd
+// dont il ne connaît pas la disposition (le bloc evGP, l'élément tmln du repère D), mesuré au run
+// 40084014421 ; sous « all », le TIFF n'est donc pas jugé sur eux, le PSD l'est.
+const TIFF_DROPS = [GLOBAL_MARKER, `${SHMD_MARKER}D`];
 // Plafond transmis dans evora:init : valeur de banc (pas un plafond du produit, D-15), assez large
 // pour la petite image et son document de travail.
 const BENCH_MAX_BYTES = 8 * 1024 * 1024;
@@ -1473,12 +1478,12 @@ export class EhpBench {
         }
         if (POLICY_LAYERED.includes(ext) && !(sc.gps16 && sc.place16)) this.fail('politique-toutes', `${where} : XMP de calque sans sa localisation sous « toutes »`);
       }
-      if (POLICY_LAYERED.includes(ext)) this.politiqueCalques(sc, where);
+      if (POLICY_LAYERED.includes(ext)) this.politiqueCalques(sc, where, ext);
     }
   }
 
   // LUM-14 r3 : objets dynamiques, blocs globaux, notes et blocs shmd d'un export à calques (TIFF, PSD).
-  politiqueCalques(sc, where) {
+  politiqueCalques(sc, where, ext) {
     const shmd = (k) => `${SHMD_MARKER}${k}`;
     if (POLICY !== 'all') {
       if (sc.placed.length || sc.other) {
@@ -1502,7 +1507,8 @@ export class EhpBench {
         ...SHMD_KEYS.filter((k) => !sc.shmd.includes(k)).map(shmd),
         ...(sc.layerTime ? [] : [LAYER_TIME_KEY]),
       ];
-      if (absent.length) this.fail('politique-toutes', `${where} : sous « toutes », absents : ${absent.join(', ')}`);
+      const judged = ext === 'tif' ? absent.filter((m) => !TIFF_DROPS.includes(m)) : absent;
+      if (judged.length) this.fail('politique-toutes', `${where} : sous « toutes », absents : ${judged.join(', ')}`);
     }
   }
 

@@ -85,6 +85,12 @@ pub fn start() {
             // theme imposed at every start.
             None => (host_language(query_param(&q, "lang").as_deref()), host_theme(query_param(&q, "theme").as_deref())),
         };
+        // Evora build (patch LUM-06 r2): the host's accent colours the Evora themes from their first
+        // frame on; patches LUM-14 r2 and LUM-15: the preferences `evora:init` sets (`host_prefs`).
+        if let Some(init) = &init {
+            photocraft_ui_egui::theme::set_host_accent(crate::host_prefs::accent(&init.accent));
+        }
+        let host_prefs = init.as_ref().map(|i| crate::host_prefs::HostPrefs::from_init(&i.prefs)).unwrap_or_default();
         // Evora build (patch E5, corrected with E4): the storage namespace comes only from
         // `evora:init`, before any storage is read (never from the URL); with `storage.purge`, the
         // other namespaces and upstream's bare names are deleted first (HOST-PROTOCOL §7.7 b),
@@ -137,7 +143,10 @@ pub fn start() {
                     let (session, warnings) = crate::preset_bridge::session(presets.clone());
                     preset_warnings.extend(warnings);
                     let drag = listen_drag(&pen_target);
-                    let mut app = PhotocraftApp::new(session, services(inbox.clone(), place_inbox.clone(), drag_pos_service(pen_target.clone(), drag), shell_bridge.clone()));
+                    let mut app = PhotocraftApp::new(
+                        session,
+                        services(inbox.clone(), place_inbox.clone(), drag_pos_service(pen_target.clone(), drag), shell_bridge.clone(), host_prefs.policy),
+                    );
                     if !preset_warnings.is_empty() {
                         photocraft_ui_egui::notices::post(&mut app, i18n::t("Some brush presets could not be loaded"), preset_warnings, true, None);
                     }
@@ -148,6 +157,8 @@ pub fn start() {
                     {
                         log::warn!("photocraft-web: host language {code} not applied: {e}");
                     }
+                    // Evora build (patches LUM-06 r2, LUM-15): the engine preferences of `evora:init`.
+                    let host_prefs = host_prefs.apply(&mut app);
                     // Evora build (patch LUM-10): the renderer, reported by `diag.stats`.
                     let renderer = match (&cc.wgpu_render_state, force_cpu) {
                         (Some(rs), false) => format!("{:?}", rs.adapter.get_info().backend),
@@ -172,7 +183,7 @@ pub fn start() {
                         bridge.attach(cc.egui_ctx.clone());
                         crate::host_menus::install();
                         crate::host_focus::listen(&bridge);
-                        crate::host_docs::HostDocs::new(bridge, renderer)
+                        crate::host_docs::HostDocs::new(bridge, renderer, host_prefs)
                     });
                     Ok(Box::new(WebShell { app, inbox, place_inbox, unsaved, served, database, presets, host }))
                 }),
@@ -537,8 +548,15 @@ impl eframe::App for WebShell {
     }
 }
 
-fn services(inbox: Inbox, place_inbox: Inbox, cursor_pos: photocraft_ui_egui::CursorPosFn, bridge: Option<crate::ehp::Bridge>) -> Services {
-    // Evora build (patch LUM-14): under the bridge, an export leaves without the location.
+fn services(
+    inbox: Inbox,
+    place_inbox: Inbox,
+    cursor_pos: photocraft_ui_egui::CursorPosFn,
+    bridge: Option<crate::ehp::Bridge>,
+    policy: crate::host_meta::Policy,
+) -> Services {
+    // Evora build (patch LUM-14): under the bridge, an export leaves without the location; patch
+    // LUM-14 r2: or with the rights alone, or as chosen, by the host's policy (`host_prefs`).
     let host = bridge.is_some();
     // Evora build (patch LUM-02): under the bridge, the files the engine reads come from the
     // host's picker (`host_pick`), never from the browser's.
@@ -558,7 +576,7 @@ fn services(inbox: Inbox, place_inbox: Inbox, cursor_pos: photocraft_ui_egui::Cu
         export: Some(Box::new(move |doc: &Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {
             // Evora build (patch LUM-14): every file but the `.pcraft` working document is encoded
             // from a copy without the location (`host_meta`).
-            let cleaned = if host { crate::host_meta::for_export(doc, path) } else { None };
+            let cleaned = if host { crate::host_meta::for_export(doc, path, policy) } else { None };
             let doc = cleaned.as_ref().unwrap_or(doc);
             photocraft_io::export(doc, path, &settings.io_options()).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
         })),

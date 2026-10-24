@@ -43,6 +43,11 @@
 //! Patch LUM-13: with `ui.focus-out` effective, F6 sends `evora:focus-out` (`host_focus`), the
 //! way out of the engine at the keyboard (Evora's HOST-PROTOCOL §7.9, A-19). The capability is
 //! additive: the engine still speaks EHP 1.0, which a host of minor 0 accepts.
+//! Patch LUM-06 r2: the accent of `evora:init` and of `evora:theme` colours the Evora themes
+//! (`host_prefs::accent`). Patches LUM-14 r2 and LUM-15 (first half): the preferences of
+//! `evora:init` (`prefs`, the host's imposed values) reach `host_prefs`, which keeps its compiled
+//! list only: the location policy of exports and the engine preferences the host may set. EHP 1.0
+//! all along: no new capability, no new message.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -127,6 +132,11 @@ pub struct Init {
     pub dark: bool,
     /// The account's storage namespace (64 lowercase hex digits), for patch E5.
     pub storage_ns: String,
+    /// `accent` (`#` and six hex digits), for the Evora themes (patch LUM-06 r2).
+    pub accent: String,
+    /// `prefs`: the host's values, each a string, a number or a boolean, read by `host_prefs`
+    /// (patches LUM-14 r2 and LUM-15).
+    pub prefs: serde_json::Map<String, serde_json::Value>,
 }
 
 /// What the host asks of the running app, applied at the start of a frame (`host_docs`).
@@ -137,8 +147,8 @@ pub enum HostEvent {
     OpenNew { id: String, doc_ref: String, name: String },
     /// `evora:request-save`: the named document, or (no `docRef`) the host's document.
     RequestSave { id: String, doc_ref: Option<String> },
-    /// `evora:theme`: dark or light.
-    Theme { id: String, dark: bool },
+    /// `evora:theme`: dark or light, and the host's accent (patch LUM-06 r2).
+    Theme { id: String, dark: bool, accent: String },
     /// `evora:lang`: the engine language (`None`: English).
     Lang { id: String, engine_lang: Option<String> },
     /// `evora:command` of the compiled list (patch LUM-10), without parameters.
@@ -572,7 +582,7 @@ impl Bridge {
             Some("light") => false,
             _ => return,
         };
-        let accent_ok = is_accent(&get(p, "accent"));
+        let accent = get(p, "accent").as_string().filter(|_| is_accent(&get(p, "accent")));
         let read_only = get(p, "readOnly").as_bool();
         let storage_ns = get(p, "storageNs").as_string().filter(|ns| is_storage_ns(ns));
         let display_name = get(p, "displayName");
@@ -586,14 +596,20 @@ impl Bridge {
         let max_document = positive_integer(&get(&limits, "maxDocumentBytes"));
         let max_export = positive_integer(&get(&limits, "maxExportBytes"));
         let limits_ok = plain_object(&limits) && only_keys(&limits, &["maxDocumentBytes", "maxExportBytes"]);
-        let (Some(engine_lang), Some(read_only), Some(storage_ns), Some(caps), Some(max_document), Some(max_export)) =
-            (engine_lang, read_only, storage_ns, caps, max_document, max_export)
+        let (Some(engine_lang), Some(read_only), Some(storage_ns), Some(caps), Some(max_document), Some(max_export), Some(accent)) =
+            (engine_lang, read_only, storage_ns, caps, max_document, max_export, accent)
         else {
             return;
         };
-        if !(lang_ok && accent_ok && display_ok && caps_ok && prefs_ok && limits_ok) {
+        if !(lang_ok && display_ok && caps_ok && prefs_ok && limits_ok) {
             return;
         }
+        // Scalars only (checked above): the JSON copy cannot fail; if it ever did, no preference.
+        let prefs = js_sys::JSON::stringify(&prefs)
+            .ok()
+            .map(String::from)
+            .and_then(|text| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&text).ok())
+            .unwrap_or_default();
         let wake = {
             let mut st = self.0.borrow_mut();
             st.caps = caps.into_iter().filter(|c| CAPABILITIES.contains(&c.as_str())).collect();
@@ -601,7 +617,7 @@ impl Bridge {
             st.max_export = max_export;
             st.read_only = read_only;
             st.initialized = true;
-            st.init = Some(Init { id: id.to_owned(), engine_lang, dark, storage_ns });
+            st.init = Some(Init { id: id.to_owned(), engine_lang, dark, storage_ns, accent, prefs });
             st.wake.take()
         };
         if let Some(wake) = wake {
@@ -778,13 +794,14 @@ impl Bridge {
         if !only_keys(p, &["theme", "accent"]) || !is_accent(&get(p, "accent")) {
             return;
         }
+        let Some(accent) = get(p, "accent").as_string() else { return };
         let dark = match get(p, "theme").as_string().as_deref() {
             Some("dark") => true,
             Some("light") => false,
             _ => return,
         };
-        // The accent is Evora's indigo already (patch E2); only light or dark changes here.
-        self.push(HostEvent::Theme { id: id.to_owned(), dark });
+        // Patch LUM-06 r2: light or dark, and the host's accent, applied together (`host_docs`).
+        self.push(HostEvent::Theme { id: id.to_owned(), dark, accent });
     }
 
     /// `evora:command {command, params}` (patch LUM-10, §4.3): only the compiled list of

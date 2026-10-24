@@ -47,6 +47,9 @@ mod host_focus;
 // Evora build (patch LUM-14): exports without the location.
 #[cfg(target_arch = "wasm32")]
 mod host_meta;
+// Evora build (patches LUM-06 r2, LUM-14 r2, LUM-15): the accent and the preferences `evora:init` sets.
+#[cfg(target_arch = "wasm32")]
+mod host_prefs;
 
 #[cfg(target_arch = "wasm32")]
 mod web;

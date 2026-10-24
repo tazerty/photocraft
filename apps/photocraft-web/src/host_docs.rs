@@ -39,6 +39,10 @@
 //! families in the font menus; the type layers set in that family, or falling back to it, are
 //! drawn again (`served_fonts::inject`). A file the engine cannot read as a font registers
 //! nothing and is refused with `invalid_content`.
+//!
+//! Patch LUM-06 r2: `evora:theme` brings the host's accent with light or dark, both applied to the
+//! Evora themes at once. `diag.stats` also reports the theme the interface is drawn with (`theme`)
+//! and what `evora:init` set (`prefs`, `host_prefs`).
 
 use std::sync::Arc;
 
@@ -169,10 +173,12 @@ pub struct HostDocs {
     new_doc: Option<NewDoc>,
     /// The families the host's fonts registered, in order (patch LUM-11, `diag.stats`).
     fonts: Vec<String>,
+    /// What `evora:init` set (patches LUM-14 r2 and LUM-15, `diag.stats`).
+    prefs: crate::host_prefs::HostPrefs,
 }
 
 impl HostDocs {
-    pub fn new(bridge: Bridge, renderer: String) -> Self {
+    pub fn new(bridge: Bridge, renderer: String, prefs: crate::host_prefs::HostPrefs) -> Self {
         HostDocs {
             bridge,
             opened: Vec::new(),
@@ -183,6 +189,7 @@ impl HostDocs {
             forced: Vec::new(),
             new_doc: None,
             fonts: Vec::new(),
+            prefs,
         }
     }
 
@@ -196,7 +203,9 @@ impl HostDocs {
                 HostEvent::Open { id, doc_ref, name, bytes } => self.open(app, &id, doc_ref, &name, &bytes),
                 HostEvent::OpenNew { id, doc_ref, name } => self.open_new(app, ctx, &id, doc_ref, name),
                 HostEvent::RequestSave { id, doc_ref } => self.request_save(app, ctx, &id, doc_ref),
-                HostEvent::Theme { id, dark } => {
+                HostEvent::Theme { id, dark, accent } => {
+                    // Patch LUM-06 r2: the accent first, so the theme applied takes it.
+                    photocraft_ui_egui::theme::set_host_accent(crate::host_prefs::accent(&accent));
                     app.set_theme(ctx, theme_kind(dark));
                     self.bridge.ack(&id, true, None);
                 }
@@ -301,7 +310,11 @@ impl HostDocs {
         match command {
             "diag.stats" => {
                 let host: Vec<(String, usize)> = self.opened.iter().filter_map(|r| index_of(app, r).map(|i| (r.clone(), i))).collect();
-                self.bridge.ack_result(id, &crate::host_commands::stats(app, &host, &self.renderer, &self.fonts));
+                let mut stats = crate::host_commands::stats(app, &host, &self.renderer, &self.fonts);
+                // Patch LUM-06 r2: the theme drawn; patches LUM-14 r2 and LUM-15: what `evora:init` set.
+                stats["theme"] = crate::host_prefs::theme_report(ctx);
+                stats["prefs"] = self.prefs.report(app, ctx);
+                self.bridge.ack_result(id, &stats);
             }
             "diag.menus" => self.bridge.ack_result(id, &crate::host_commands::menus(app)),
             _ => match crate::host_commands::run_engine(app, ctx, command) {

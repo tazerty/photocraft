@@ -96,9 +96,9 @@
 // octets reçus : « none » et « rights » ne laissent sortir aucune localisation (latitude GPS, nom de
 // propriété GPS, lieu), ni dans un XMP de calque (UTF-16 du PSD) ; « rights » ne laisse sortir ni
 // la marque de l'appareil ni un XMP de calque ; « all » garde la localisation, la marque et les
-// droits (PNG et PSD, qui écrivent à coup sûr EXIF et XMP ; les autres formats sont relevés). Les
-// témoins intacts (marque et droits en « none », droits en « rights ») prouvent que les métadonnées
-// sont lues et réécrites.
+// droits, dans les cinq formats, et l'XMP de calque avec sa localisation (TIFF à calques et PSD).
+// Les témoins intacts (marque et droits en « none », droits en « rights », XMP de calque nettoyé en
+// « none ») prouvent que les métadonnées sont lues et réécrites.
 //
 // Témoins sabordés (SMOKE_SABOTAGE) : le même banc, sur un défaut fabriqué ; un témoin est VALIDE
 // (code 0) seulement si chaque défaut rougit à SON détecteur, à SA place, et si tout le reste du banc
@@ -161,6 +161,9 @@ const INIT_ACCENT = '#0E7490';
 const EVORA_ACCENT = '#4F46E5';
 const THEME_STEPS = [{ theme: 'light', accent: '#BE185D', kind: 'evoraLight' }, { theme: 'dark', accent: '#B45309', kind: 'evora' }];
 const FIELD_BORDER = '#71717A';
+// Écart admis par canal entre le fond d'accent rapporté et l'accent reçu (arrondi de la
+// prémultiplication d'egui, alpha 40 ou 64).
+const SOFT_TOLERANCE = 4;
 const THEME_KEYS = ['accent', 'accentText', 'accentBorder', 'accentSoft', 'primaryBg', 'primaryText', 'fieldBorder', 'field', 'card', 'chrome',
   'dock', 'hover', 'pressed', 'canvas', 'canvasDot', 'inactiveBorder', 'activeBorder', 'selectionStroke'];
 // LUM-14 r2 et LUM-15 : préférences imposées par la coquille dans evora:init (engines.json,
@@ -177,9 +180,13 @@ export const POLICY = process.env.SMOKE_POLICY || '';
 if (!['', 'none', 'rights', 'all'].includes(POLICY)) throw new Error(`SMOKE_POLICY inconnue : ${POLICY}`);
 const POLICY_REF = '01JZZSMKEDCQMENTREF000000E';
 const POLICY_FORMATS = ['png', 'jpg', 'tif', 'webp', 'psd'];
-// Formats dont l'écriture d'EXIF et de XMP est certaine (prouvée par les exports du banc pont-ehp
-// pour le PNG ; écrite sans condition par l'exportateur PSD) : leurs témoins intacts sont exigés.
-const POLICY_STRICT = ['png', 'psd'];
+// Formats dont les témoins intacts sont exigés : tous. PNG et PSD écrivent EXIF et XMP à coup sûr ;
+// JPEG, TIFF et WebP les écrivent aussi, mesuré par le premier run de ce banc (40077170134 : sous
+// « all », latitude, lieu, marque et droits présents dans les cinq formats ; sous « none », marque et
+// droits présents, aucune localisation). Le TIFF à calques et le PSD portent en plus l'XMP propre des
+// calques (UTF-16), mesuré de même.
+const POLICY_STRICT = ['png', 'jpg', 'tif', 'webp', 'psd'];
+const POLICY_LAYERED = ['tif', 'psd'];
 const SMOKE_EXPORT = 'evora:smoke-export';
 const SMOKE_LAYER_XMP = 'evora:smoke-layer-xmp';
 // Plafond transmis dans evora:init : valeur de banc (pas un plafond du produit, D-15), assez large
@@ -944,8 +951,13 @@ export function accentProblems(t, want) {
   if (t.kind !== want.kind) out.push(`thème ${t.kind}, attendu ${want.kind}`);
   const bg = rgba(t.primaryBg);
   const soft = rgba(t.accentSoft);
+  const sent = rgba(want.accent);
   if (!bg || hex6(bg) !== want.accent.toUpperCase()) out.push(`bouton principal ${t.primaryBg}, attendu l'accent de la coquille ${want.accent}`);
-  if (!soft || hex6(soft) !== want.accent.toUpperCase()) out.push(`fond d'accent ${t.accentSoft}, attendu l'accent de la coquille ${want.accent}`);
+  // Le fond d'accent est translucide : egui le garde prémultiplié, et le rapport le rend
+  // déprémultiplié, à quelques unités près (alpha 40 : jusqu'à 3,2 par canal ; run 40077170134).
+  if (!soft || soft.slice(0, 3).some((v, i) => Math.abs(v - sent[i]) > SOFT_TOLERANCE)) {
+    out.push(`fond d'accent ${t.accentSoft}, attendu l'accent de la coquille ${want.accent} (à ${SOFT_TOLERANCE} près par canal)`);
+  }
   return out;
 }
 
@@ -1339,13 +1351,13 @@ export class EhpBench {
       }
       if (POLICY === 'none' && strict) {
         if (!sc.make || !sc.rights) this.fail('politique-temoin', `${where} : marque (${sc.make}) ou droits (${sc.rights}) absents : la recette ne prouve rien`);
-        if (ext === 'psd' && !sc.rights16) this.fail('politique-temoin', `${where} : XMP de calque absent (droits en UTF-16) : la recette ne prouve rien`);
+        if (POLICY_LAYERED.includes(ext) && !sc.rights16) this.fail('politique-temoin', `${where} : XMP de calque absent (droits en UTF-16) : la recette ne prouve rien`);
       }
       if (POLICY === 'all' && strict) {
         if (!(sc.latitude && sc.place && sc.make && sc.rights)) {
           this.fail('politique-toutes', `${where} : sous « toutes », latitude ${sc.latitude}, lieu ${sc.place}, marque ${sc.make}, droits ${sc.rights} (attendus présents)`);
         }
-        if (ext === 'psd' && !(sc.gps16 && sc.place16)) this.fail('politique-toutes', `${where} : XMP de calque sans sa localisation sous « toutes »`);
+        if (POLICY_LAYERED.includes(ext) && !(sc.gps16 && sc.place16)) this.fail('politique-toutes', `${where} : XMP de calque sans sa localisation sous « toutes »`);
       }
     }
   }

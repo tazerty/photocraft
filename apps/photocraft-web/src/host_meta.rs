@@ -6,13 +6,19 @@
 //! metadata loses what locates the picture, whatever the format writes (PNG, JPEG, WebP, TIFF,
 //! PSD…) and whatever the export dialog chose:
 //! - the GPS directory of its EXIF: IFD0's pointer, the directory and the values it points to;
-//! - the location properties of its XMP: every `exif:GPS*` one, and the place names of the
-//!   Photoshop and IPTC schemas, as attributes or as elements;
-//! - the place datasets of a PSD's IPTC record (image resource 1028).
+//! - the location properties of its XMP, as attributes or as elements, under any namespace prefix:
+//!   every property whose local name starts with `GPS`, and the place names (City, State,
+//!   Country, Location, Sublocation…);
+//! - the place datasets of a PSD's IPTC record (image resource 1028);
+//! - in its free-form text (PNG `tEXt`, `zTXt` and `iTXt`, TIFF ASCII tags): the raw profiles that
+//!   other tools write in text (`Raw profile type exif` and `xmp`, hexadecimal, decoded and cleaned
+//!   as above; every other raw profile but a colour profile left out), an entry that holds an XMP
+//!   packet (cleaned as above), and any entry that still names a GPS or a place.
 //!
 //! What the engine cannot read with certainty is left out whole, never passed on unread: an EXIF
-//! block or an IPTC record it cannot walk, an XMP packet it cannot scan, or one that still names
-//! a GPS coordinate once cleaned (another prefix). The working document keeps everything: it
+//! block or an IPTC record it cannot walk, an EXIF block with more than one GPS pointer or a GPS
+//! pointer outside IFD0, an XMP packet it cannot scan or that still names a GPS or a place once
+//! cleaned (any prefix), a raw profile it cannot decode. The working document keeps everything: it
 //! stays the user's own file. Without the bridge, upstream's exports are unchanged.
 
 use std::sync::Arc;
@@ -26,8 +32,31 @@ const IPTC_RESOURCE: u16 = 1028;
 /// IPTC record 2 datasets that name a place: content location code and name, city, sub-location,
 /// province or state, country code and name.
 const IPTC_PLACES: [u8; 7] = [26, 27, 90, 92, 95, 100, 101];
-/// What still names a coordinate in a cleaned XMP packet (any namespace prefix).
-const XMP_COORDINATES: [&str; 2] = ["GPSLatitude", "GPSLongitude"];
+/// The local names of the XMP properties that name a place (Photoshop, IPTC Core and Extension),
+/// whatever their prefix; every local name that starts with `GPS` names a coordinate.
+const XMP_PLACES: [&str; 14] = [
+    "City",
+    "State",
+    "Country",
+    "CountryCode",
+    "CountryName",
+    "Location",
+    "LocationCreated",
+    "LocationShown",
+    "LocationId",
+    "LocationName",
+    "Sublocation",
+    "ProvinceState",
+    "ProvinceName",
+    "WorldRegion",
+];
+/// What a free-form text entry or a cleaned XMP packet must not hold any more.
+const GPS_MARK: &str = "GPS";
+/// The raw profiles (`Raw profile type <name>`) kept: cleaned (EXIF, XMP) or without location
+/// (colour profiles). Any other is left out.
+const RAW_PROFILE: &str = "raw profile type ";
+/// Text entries whose keyword names a location (lowercase, as a part of the keyword).
+const TEXT_PLACE_KEYS: [&str; 8] = ["gps", "latitude", "longitude", "location", "city", "country", "province", "geotag"];
 
 /// One piece of metadata, once examined.
 enum Edit<T> {
@@ -71,7 +100,8 @@ fn without_location(m: &Metadata) -> Option<Metadata> {
             Edit::Dropped => resources_changed = true,
         }
     }
-    if matches!(exif, Edit::Kept) && matches!(xmp, Edit::Kept) && !resources_changed {
+    let text = text_without_location(&m.text);
+    if matches!(exif, Edit::Kept) && matches!(xmp, Edit::Kept) && !resources_changed && text.is_none() {
         return None;
     }
     let mut out = m.clone();
@@ -88,7 +118,103 @@ fn without_location(m: &Metadata) -> Option<Metadata> {
     if resources_changed {
         out.psd_resources = resources;
     }
+    if let Some(text) = text {
+        out.text = text;
+    }
     Some(out)
+}
+
+/// The free-form text entries without their location; `None` when nothing locates the picture.
+fn text_without_location(entries: &[(String, String)]) -> Option<Vec<(String, String)>> {
+    let mut out = Vec::with_capacity(entries.len());
+    let mut changed = false;
+    for (key, value) in entries {
+        match text_entry(key, value) {
+            Edit::Kept => out.push((key.clone(), value.clone())),
+            Edit::Changed(v) => {
+                out.push((key.clone(), v));
+                changed = true;
+            }
+            Edit::Dropped => changed = true,
+        }
+    }
+    changed.then_some(out)
+}
+
+/// One free-form text entry (see the module docs).
+fn text_entry(key: &str, value: &str) -> Edit<String> {
+    let lower = key.to_ascii_lowercase();
+    let edit = if let Some(name) = lower.strip_prefix(RAW_PROFILE) {
+        raw_profile(name.trim(), value)
+    } else if value.contains("<x:xmpmeta") || value.contains("<rdf:RDF") {
+        xmp_without_location(value)
+    } else {
+        Edit::Kept
+    };
+    if matches!(edit, Edit::Dropped) {
+        return Edit::Dropped;
+    }
+    // Whatever is left must name neither a GPS nor a place.
+    let left = match &edit {
+        Edit::Changed(v) => v.as_str(),
+        _ => value,
+    };
+    if TEXT_PLACE_KEYS.iter().any(|k| lower.contains(k)) || left.to_ascii_lowercase().contains("gps") {
+        return Edit::Dropped;
+    }
+    edit
+}
+
+/// A raw profile in text (`\n<name>\n<length>\n<hexadecimal lines>\n`, as ImageMagick writes
+/// it): EXIF and XMP decoded, cleaned and written again; colour profiles kept; anything else, or
+/// a profile that cannot be decoded, left out.
+fn raw_profile(name: &str, value: &str) -> Edit<String> {
+    if matches!(name, "icc" | "icm") {
+        return Edit::Kept;
+    }
+    if !matches!(name, "exif" | "xmp") {
+        return Edit::Dropped;
+    }
+    let Some(bytes) = raw_profile_bytes(value) else { return Edit::Dropped };
+    let cleaned = if name == "exif" {
+        exif_without_gps(&bytes)
+    } else {
+        match std::str::from_utf8(&bytes).map(xmp_without_location) {
+            Ok(Edit::Changed(x)) => Edit::Changed(x.into_bytes()),
+            Ok(Edit::Kept) => Edit::Kept,
+            _ => Edit::Dropped,
+        }
+    };
+    match cleaned {
+        Edit::Kept => Edit::Kept,
+        Edit::Changed(b) => Edit::Changed(raw_profile_text(name, &b)),
+        Edit::Dropped => Edit::Dropped,
+    }
+}
+
+/// The bytes of a raw profile: its name, its decimal length, then the hexadecimal digits, which
+/// must give exactly that length. `None` otherwise.
+fn raw_profile_bytes(value: &str) -> Option<Vec<u8>> {
+    let mut words = value.split_whitespace();
+    let _name = words.next()?;
+    let length: usize = words.next()?.parse().ok()?;
+    let hex: String = words.collect();
+    if hex.len() != length.checked_mul(2)? || !hex.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    (0..length).map(|i| hex.get(2 * i..2 * i + 2).and_then(|h| u8::from_str_radix(h, 16).ok())).collect()
+}
+
+/// A raw profile written back in the same form, 72 hexadecimal digits per line.
+fn raw_profile_text(name: &str, bytes: &[u8]) -> String {
+    let mut out = format!("\n{name}\n{:8}\n", bytes.len());
+    for line in bytes.chunks(36) {
+        for b in line {
+            out.push_str(&format!("{b:02x}"));
+        }
+        out.push('\n');
+    }
+    out
 }
 
 /// An EXIF block (with or without its `Exif\0\0` prefix) without its GPS directory.
@@ -151,7 +277,22 @@ fn gps_removed(tiff: &[u8]) -> Option<Option<Vec<u8>>> {
     if end > tiff.len() {
         return None;
     }
-    let Some(at) = (0..count).find(|&i| entry(i).and_then(|e| r.u16(e)) == Some(TAG_GPS_IFD)) else { return Some(None) };
+    // A GPS pointer in the next directory (IFD1) is not read with certainty: the block is left out.
+    let next = r.offset(end - 4)?;
+    if next != 0 {
+        let n = usize::from(r.u16(next)?);
+        let next_end = next.checked_add(2 + 12 * n)?;
+        if next_end > tiff.len() || (0..n).any(|i| r.u16(next + 2 + 12 * i) == Some(TAG_GPS_IFD)) {
+            return None;
+        }
+    }
+    let pointers: Vec<usize> = (0..count).filter(|&i| entry(i).and_then(|e| r.u16(e)) == Some(TAG_GPS_IFD)).collect();
+    // More than one GPS pointer: the block is left out whole.
+    let at = match pointers.as_slice() {
+        [] => return Some(None),
+        [at] => *at,
+        _ => return None,
+    };
     let pointer = entry(at)?;
     let mut out = tiff.to_vec();
     clear_directory(&r, &mut out, r.offset(pointer + 8)?)?;
@@ -202,13 +343,23 @@ fn put_u16(out: &mut [u8], at: usize, v: u16, le: bool) -> Option<()> {
     Some(())
 }
 
-/// Does the XMP property `name` locate the picture?
+/// Does the XMP property `name` (`prefix:local`, any prefix) locate the picture?
 fn locates(name: &str) -> bool {
-    name.starts_with("exif:GPS")
-        || matches!(
-            name,
-            "photoshop:City" | "photoshop:State" | "photoshop:Country" | "Iptc4xmpCore:Location" | "Iptc4xmpCore:CountryCode" | "Iptc4xmpExt:LocationCreated" | "Iptc4xmpExt:LocationShown"
-        )
+    let local = name.split_once(':').map_or(name, |(_, local)| local);
+    local.starts_with(GPS_MARK) || XMP_PLACES.contains(&local)
+}
+
+/// Does a cleaned XMP packet still name a GPS, or a place property under any prefix?
+fn names_location(xmp: &str) -> bool {
+    if xmp.contains(GPS_MARK) {
+        return true;
+    }
+    XMP_PLACES.iter().any(|place| {
+        let needle = format!(":{place}");
+        xmp.match_indices(needle.as_str()).any(|(i, _)| {
+            xmp.as_bytes().get(i + needle.len()).is_none_or(|&c| c.is_ascii_whitespace() || matches!(c, b'=' | b'>' | b'/'))
+        })
+    })
 }
 
 /// An XMP packet without its location properties: elements (with their content) and attributes.
@@ -250,8 +401,8 @@ fn xmp_without_location(xmp: &str) -> Edit<String> {
         out.push_str(xmp.get(copied..).unwrap_or_default());
     }
     let cleaned = if changed { out.as_str() } else { xmp };
-    // A coordinate left under another prefix: the packet is not passed on.
-    if XMP_COORDINATES.iter().any(|c| cleaned.contains(*c)) {
+    // A coordinate or a place left (in text, or in a structure not read): the packet is not passed on.
+    if names_location(cleaned) {
         return Edit::Dropped;
     }
     if changed { Edit::Changed(out) } else { Edit::Kept }

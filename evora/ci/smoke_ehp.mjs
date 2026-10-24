@@ -54,12 +54,17 @@
 //     de la CI) accusé positivement, ses familles listées par diag.stats (fonts) ; des octets qui ne
 //     sont pas une police refusés (invalid_content) ;
 //   - sortie clavier (LUM-13) : F6 retenue par le moteur (ni le canevas ni le navigateur ne la
-//     voient) et un seul evora:focus-out {} ; Maj+F6 laissée passer, sans message ;
+//     voient) et un seul evora:focus-out {} ; Ctrl+F6 laissée passer, sans message (Maj+F6 est le
+//     raccourci Contour progressif du moteur) ;
 //   - localisation (LUM-14) : une photo géolocalisée (EXIF avec répertoire GPS, XMP avec propriétés
 //     GPS et ville) exportée avec Métadonnées « toutes » (choix mémorisé posé avant le démarrage)
 //     sort sans répertoire GPS, sans les valeurs de latitude, sans propriété GPS ni ville dans son
 //     XMP, mais avec la marque de l'appareil (EXIF) et les droits (XMP) : ce que le témoin intact
-//     prouve, c'est que les métadonnées sont lues et réécrites ;
+//     prouve, c'est que les métadonnées sont lues et réécrites ; de même pour les trois photos du
+//     constat de la revue du 2026-10-23 (profil brut EXIF en texte, forme ImageMagick, nettoyé et
+//     gardé avec la marque ; EXIF à deux pointeurs GPS, sans GPS en sortie ; noms de lieu XMP sous un
+//     autre préfixe, retirés, droits gardés) ; l'instrument est étalonné sur chaque photo avant
+//     export (elle doit se lire localisée) ;
 //   - sélecteur de la coquille (LUM-02) : Fichier › Placer (evora:command file.placeEmbedded)
 //     demande evora:pick {purpose: "import"}, le fichier remis est placé (evora:dirty true) ;
 //     Ctrl+O (Fichier › Ouvrir) demande evora:pick {purpose: "open", multiple}, le fichier remis
@@ -106,6 +111,11 @@ const CANCEL_REF = '01JZZSMKEDCQMENTREF0000005';
 // sélecteur de la coquille.
 const GPS_REF = '01JZZSMKEDCQMENTREF0000006';
 const PICK_UID = '01JZZSMKEDCQMENTREF0000007';
+// LUM-14, constat de la revue du 2026-10-23 : un profil brut EXIF en texte (forme ImageMagick), un
+// EXIF à deux pointeurs GPS, des noms de lieu XMP sous un autre préfixe.
+const RAW_REF = '01JZZSMKEDCQMENTREF0000008';
+const DUAL_REF = '01JZZSMKEDCQMENTREF0000009';
+const PLACE_REF = '01JZZSMKEDCQMENTREF000000A';
 const MIME_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
 const STORAGE_NS = 'ab'.repeat(32);
 // E5 : un autre compte du même navigateur, et un autre moteur servi par la même origine.
@@ -363,6 +373,41 @@ function exifFixture() {
   return out;
 }
 
+// LUM-14 (revue) : un EXIF dont IFD0 a deux pointeurs GPS, chacun vers un répertoire qui porte la
+// latitude : retirer le premier seul laisse le second.
+function dualExifFixture() {
+  const make = Buffer.from(`${EXIF_MAKE}\0`, 'latin1');
+  const out = Buffer.alloc(62 + 2 * 42);
+  out.write('II', 0, 'latin1');
+  out.writeUInt16LE(42, 2);
+  out.writeUInt32LE(8, 4);
+  // IFD0 à 8 : trois entrées, puis le prochain répertoire (aucun) ; fin à 50 ; marque à 50.
+  out.writeUInt16LE(3, 8);
+  out.writeUInt16LE(0x010f, 10); out.writeUInt16LE(2, 12); out.writeUInt32LE(make.length, 14); out.writeUInt32LE(50, 18);
+  for (const [k, at] of [[0, 62], [1, 104]]) {
+    const e = 22 + 12 * k;
+    out.writeUInt16LE(0x8825, e); out.writeUInt16LE(4, e + 2); out.writeUInt32LE(1, e + 4); out.writeUInt32LE(at, e + 8);
+  }
+  out.writeUInt32LE(0, 46);
+  make.copy(out, 50);
+  // Deux répertoires GPS (62 et 104) : une entrée (latitude, hors entrée), puis le prochain (aucun).
+  for (const at of [62, 104]) {
+    out.writeUInt16LE(1, at);
+    out.writeUInt16LE(2, at + 2); out.writeUInt16LE(5, at + 4); out.writeUInt32LE(3, at + 6); out.writeUInt32LE(at + 18, at + 10);
+    out.writeUInt32LE(0, at + 14);
+    GPS_LATITUDE.forEach((w, k) => out.writeUInt32LE(w, at + 18 + 4 * k));
+  }
+  return out;
+}
+
+// LUM-14 (revue) : un profil brut en texte, tel qu'ImageMagick l'écrit : « \n<nom>\n<longueur sur 8>\n »,
+// puis l'hexadécimal par lignes de 72 chiffres.
+function rawProfile(name, bytes) {
+  let out = `\n${name}\n${String(bytes.length).padStart(8)}\n`;
+  for (let i = 0; i < bytes.length; i += 36) out += `${bytes.subarray(i, i + 36).toString('hex')}\n`;
+  return out;
+}
+
 // LUM-14 : le XMP de la même photo : latitude (attribut), ville (attribut), longitude et version
 // GPS (éléments, l'une avec un contenu imbriqué), altitude (élément vide), puis les droits (témoin
 // intact).
@@ -374,6 +419,16 @@ const XMP_FIXTURE = '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmet
   + '<exif:GPSLongitude>56,7.89E</exif:GPSLongitude><exif:GPSVersionID><rdf:Seq><rdf:li>2</rdf:li></rdf:Seq></exif:GPSVersionID>'
   + `<exif:GPSAltitude/><dc:rights><rdf:Alt><rdf:li xml:lang="x-default">${XMP_RIGHTS}</rdf:li></rdf:Alt></dc:rights>`
   + '</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>';
+// LUM-14 (revue) : des noms de lieu sous un préfixe qui n'est pas celui du schéma (ps2:City), et
+// Sublocation de l'IPTC, avec les droits (témoin intact).
+const XMP_PLACES_FIXTURE = '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/">'
+  + '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about=""'
+  + ' xmlns:ps2="http://ns.adobe.com/photoshop/1.0/" xmlns:Iptc4xmpCore="http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"'
+  + ' xmlns:dc="http://purl.org/dc/elements/1.1/" ps2:City="Papeete">'
+  + '<Iptc4xmpCore:Sublocation>Papeete</Iptc4xmpCore:Sublocation>'
+  + `<dc:rights><rdf:Alt><rdf:li xml:lang="x-default">${XMP_RIGHTS}</rdf:li></rdf:Alt></dc:rights>`
+  + '</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>';
+
 function itxt(keyword, text) {
   return Buffer.concat([Buffer.from(keyword, 'latin1'), Buffer.from([0, 0, 0, 0, 0]), Buffer.from(text, 'utf8')]);
 }
@@ -382,6 +437,26 @@ function itxt(keyword, text) {
 function geoPng() {
   return pngFile([['eXIf', exifFixture()], ['iTXt', itxt('XML:com.adobe.xmp', XMP_FIXTURE)]]);
 }
+
+// LUM-14 (revue) : les trois photos du constat.
+function rawPng() {
+  const value = rawProfile('exif', Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), exifFixture()]));
+  return pngFile([['tEXt', Buffer.concat([Buffer.from('Raw profile type exif', 'latin1'), Buffer.from([0]), Buffer.from(value, 'latin1')])]]);
+}
+function dualPng() {
+  return pngFile([['eXIf', dualExifFixture()]]);
+}
+function placePng() {
+  return pngFile([['iTXt', itxt('XML:com.adobe.xmp', XMP_PLACES_FIXTURE)]]);
+}
+
+// Les photos géolocalisées du banc, par docRef (LUM-14).
+const GEO_FIXTURES = [
+  { ref: GPS_REF, name: 'evora-geo.png', make: geoPng },
+  { ref: RAW_REF, name: 'evora-brut.png', make: rawPng },
+  { ref: DUAL_REF, name: 'evora-double.png', make: dualPng },
+  { ref: PLACE_REF, name: 'evora-lieux.png', make: placePng },
+];
 
 // LUM-11 : la plus petite police TrueType ou OpenType du dossier des polices servies (quatrième
 // argument de smoke.mjs, fonts/manifest.txt de craft-fonts), ou null.
@@ -478,7 +553,7 @@ export const WITNESS_JS = `(() => {
 // aux témoins. Les octets sont résumés (taille, quatre premiers octets) pour le journal.
 export function harnessJs() {
   const fixture = png().toString('base64');
-  const geo = geoPng().toString('base64');
+  const geo = Object.fromEntries(GEO_FIXTURES.map((f) => [f.ref, f.make().toString('base64')]));
   const font = benchFont();
   return `(() => {
   const engine = document.getElementById('engine');
@@ -528,7 +603,23 @@ export function harnessJs() {
     const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
     if (b.length < 8 || sig.some((v, i) => b[i] !== v)) return null;
     const dv = new DataView(buf);
-    const out = { exif: false, make: false, gpsTag: false, latitude: false, xmp: false, compressed: false, rights: false, location: false };
+    const out = { exif: false, make: false, gpsTag: false, latitude: false, xmp: false, compressed: false, rights: false, location: false,
+      raw: false, rawMake: false, rawGps: false, rawLatitude: false, textLocation: false, textCompressed: false };
+    const text = (key, value) => {
+      if (/gps|papeete|latitude|longitude/i.test(key) || /gps|papeete/i.test(value)) out.textLocation = true;
+      if (/^raw profile type exif$/i.test(key)) {
+        const w = value.trim().split(/\\s+/);
+        const hex = w.slice(2).join('');
+        const bytes = /^[0-9a-f]*$/i.test(hex) && hex.length === 2 * Number(w[1]) ? Uint8Array.from(hex.match(/../g) || [], (h) => parseInt(h, 16)) : null;
+        out.raw = true;
+        if (!bytes) { out.rawGps = true; return; }
+        const body = latin1(bytes.subarray(0, 6)) === 'Exif\\0\\0' ? bytes.subarray(6) : bytes;
+        const t = tiffTags(body);
+        out.rawMake = !!t.tags && t.tags.includes(0x010f) && latin1(body).includes(${JSON.stringify(EXIF_MAKE)});
+        out.rawGps = !t.tags || t.tags.includes(0x8825);
+        out.rawLatitude = latitude(body, t.le);
+      }
+    };
     let at = 8;
     while (at + 12 <= b.length) {
       const len = dv.getUint32(at);
@@ -540,9 +631,21 @@ export function harnessJs() {
         out.make = !!t.tags && t.tags.includes(0x010f) && latin1(data).includes(${JSON.stringify(EXIF_MAKE)});
         out.gpsTag = !t.tags || t.tags.includes(0x8825);
         out.latitude = latitude(data, t.le);
+      } else if (type === 'tEXt') {
+        const k = data.indexOf(0);
+        if (k > 0) text(latin1(data.subarray(0, k)), latin1(data.subarray(k + 1)));
+      } else if (type === 'zTXt') {
+        out.textCompressed = true;
       } else if (type === 'iTXt') {
         const k = data.indexOf(0);
-        if (k > 0 && latin1(data.subarray(0, k)) === 'XML:com.adobe.xmp') {
+        if (k > 0 && latin1(data.subarray(0, k)) !== 'XML:com.adobe.xmp') {
+          if (data[k + 1]) out.textCompressed = true;
+          else {
+            let q = data.indexOf(0, k + 3) + 1;
+            q = data.indexOf(0, q) + 1;
+            text(latin1(data.subarray(0, k)), new TextDecoder().decode(data.subarray(q)));
+          }
+        } else if (k > 0) {
           out.xmp = true;
           if (data[k + 1]) out.compressed = true;
           else {
@@ -597,7 +700,10 @@ export function harnessJs() {
       return id;
     },
     png() { return Uint8Array.from(atob('${fixture}'), (c) => c.charCodeAt(0)).buffer; },
-    geoPng() { return Uint8Array.from(atob('${geo}'), (c) => c.charCodeAt(0)).buffer; },
+    geo(ref) { return Uint8Array.from(atob(${JSON.stringify(geo)}[ref]), (c) => c.charCodeAt(0)).buffer; },
+    geoPng() { return this.geo(${JSON.stringify(GPS_REF)}); },
+    // Étalonnage de l'instrument (LUM-14) : ce que pngMeta lit dans chaque photo du banc avant export.
+    calibrate() { return Object.fromEntries(Object.keys(${JSON.stringify(geo)}).map((ref) => [ref, pngMeta(this.geo(ref))])); },
     fontInfo() { return ${JSON.stringify(font ? { family: font.family, format: font.format } : null)}; },
     font() { return Uint8Array.from(atob('${font ? font.b64 : ''}'), (c) => c.charCodeAt(0)).buffer; },
   };
@@ -953,7 +1059,8 @@ export class EhpBench {
       `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(this.ids.fontBad)}, payload: { ok: true } }`);
   }
 
-  // LUM-13 : F6 retenue, un seul evora:focus-out ; Maj+F6 laissée passer, sans message.
+  // LUM-13 : F6 retenue, un seul evora:focus-out ; Ctrl+F6 (sans raccourci dans le moteur, quand Maj+F6
+  // ouvrirait Contour progressif) laissée passer, sans message.
   async focusOut() {
     const mark = (await this.refresh()).log.length;
     const held = await this.evaluate(this.frame(), keyDown('F6', 'F6'), true);
@@ -962,30 +1069,48 @@ export class EhpBench {
     if (!out) this.fail('focus-out', 'F6 avec ui.focus-out effective : aucun evora:focus-out');
     if (!held) this.fail('focus-out', 'F6 non retenue par le moteur : le canevas et le navigateur la reçoivent');
     const mark2 = (await this.refresh()).log.length;
-    const shifted = await this.evaluate(this.frame(), keyDown('F6', 'F6', { shift: true }), true);
+    const shifted = await this.evaluate(this.frame(), keyDown('F6', 'F6', { ctrl: true }), true);
     await sleep(1500);
     await this.refresh();
     const extra = this.state.log.slice(mark2).filter((e) => e.fromEngine && e.plain && e.msg.type === 'evora:focus-out' && !this.injectedIds.includes(e.msg.id));
-    if (shifted || extra.length) this.fail('focus-out', `Maj+F6 retenue (${shifted}) ou suivie d'un evora:focus-out (${extra.map((e) => e.msg.id).join(', ') || 'aucun'})`);
+    if (shifted || extra.length) this.fail('focus-out', `Ctrl+F6 retenue (${shifted}) ou suivie d'un evora:focus-out (${extra.map((e) => e.msg.id).join(', ') || 'aucun'})`);
     await this.sabotage('focus-out', 'evora:focus-out à charge utile non vide', `{ v: 1, type: 'evora:focus-out', payload: { touche: 'F6' } }`);
   }
 
-  // LUM-14 : la photo géolocalisée, ouverte par la coquille puis exportée (Exporter sous, Entrée) ;
-  // les métadonnées du PNG reçu sont jugées par verify().
+  // LUM-14 : les photos géolocalisées (la première, puis les trois du constat de la revue du
+  // 2026-10-23 : profil brut EXIF en texte, deux pointeurs GPS, noms de lieu sous un autre préfixe),
+  // ouvertes par la coquille puis exportées (Exporter sous, Entrée) ; les métadonnées des PNG reçus
+  // sont jugées par verify(). D'abord l'étalonnage de l'instrument : chaque photo, avant export, doit
+  // se lire localisée (sinon le banc ne prouve rien).
   async exportNoGps() {
-    const id = await this.send('evora:open', `{ docRef: ${JSON.stringify(GPS_REF)}, name: 'evora-geo.png', bytes: __ehp.geoPng() }`);
-    const ack = await this.waitEngine((m) => m.type === 'evora:ack' && m.re === id && !this.injectedIds.includes(m.id), 30000);
-    if (!ack || ack.msg.payload.ok !== true) {
-      this.fail('export-no-gps', `ouverture de la photo géolocalisée : ${JSON.stringify(ack && ack.msg)}`);
-      return;
+    const cal = await this.evaluate(this.page, '__ehp.calibrate()');
+    const located = {
+      [GPS_REF]: (g) => g.gpsTag && g.latitude && g.location,
+      [RAW_REF]: (g) => g.raw && g.rawGps && g.rawLatitude,
+      [DUAL_REF]: (g) => g.gpsTag && g.latitude,
+      [PLACE_REF]: (g) => g.location && g.rights,
+    };
+    for (const f of GEO_FIXTURES) {
+      const g = cal && cal[f.ref];
+      if (!g || !located[f.ref](g)) this.fail('bench', `étalonnage : ${f.name} ne se lit pas localisée avant export : ${JSON.stringify(g)}`);
     }
-    const out = await this.exportAs('export-no-gps');
-    if (out) {
-      this.ids.gpsExport = out.msg.id;
-      await this.send('evora:ack', '{ ok: true }', { re: out.msg.id });
+    this.ids.gpsExports = {};
+    for (const f of GEO_FIXTURES) {
+      const id = await this.send('evora:open', `{ docRef: ${JSON.stringify(f.ref)}, name: ${JSON.stringify(f.name)}, bytes: __ehp.geo(${JSON.stringify(f.ref)}) }`);
+      const ack = await this.waitEngine((m) => m.type === 'evora:ack' && m.re === id && !this.injectedIds.includes(m.id), 30000);
+      if (!ack || ack.msg.payload.ok !== true) {
+        this.fail('export-no-gps', `ouverture de ${f.name} : ${JSON.stringify(ack && ack.msg)}`);
+        continue;
+      }
+      this.ids.lastGeoRef = f.ref;
+      const out = await this.exportAs('export-no-gps');
+      if (out) {
+        this.ids.gpsExports[f.ref] = out.msg.id;
+        await this.send('evora:ack', '{ ok: true }', { re: out.msg.id });
+      }
     }
-    await this.sabotage('export-no-gps', 'evora:export d\'une photo encore géolocalisée',
-      `{ v: 1, type: 'evora:export', payload: { docRef: ${JSON.stringify(GPS_REF)}, name: 'evora-geo.png', mime: 'image/png', bytes: Uint8Array.from(atob('${geoPng().toString('base64')}'), (c) => c.charCodeAt(0)).buffer } }`);
+    await this.sabotage('export-no-gps', 'evora:export d\'une photo au profil brut EXIF encore géolocalisé',
+      `{ v: 1, type: 'evora:export', payload: { docRef: ${JSON.stringify(RAW_REF)}, name: 'evora-brut.png', mime: 'image/png', bytes: Uint8Array.from(atob('${rawPng().toString('base64')}'), (c) => c.charCodeAt(0)).buffer } }`);
   }
 
   // LUM-02 : le sélecteur de la coquille, pour Placer (import), Ouvrir (open), une annulation, et
@@ -1009,8 +1134,9 @@ export class EhpBench {
       const at = (await this.refresh()).log.length;
       await this.send('evora:file', `{ path: '/evora/${PICK_UID}/evora-place.png', name: 'evora-place.png', bytes: __ehp.png() }`, { re: imp.msg.id });
       await this.send('evora:ack', '{ ok: true }', { re: imp.msg.id });
-      const placed = await this.waitEngine((m) => m.type === 'evora:dirty' && m.payload.docRef === GPS_REF && m.payload.dirty === true && !this.injectedIds.includes(m.id), 10000, at);
-      if (!placed) this.fail('pick', 'le fichier remis par la coquille n\'a pas été placé (aucun evora:dirty true de la photo)');
+      const target = this.ids.lastGeoRef || GPS_REF;
+      const placed = await this.waitEngine((m) => m.type === 'evora:dirty' && m.payload.docRef === target && m.payload.dirty === true && !this.injectedIds.includes(m.id), 10000, at);
+      if (!placed) this.fail('pick', 'le fichier remis par la coquille n\'a pas été placé (aucun evora:dirty true du document actif)');
       // Transformation manuelle du calque placé : validée.
       await this.evaluate(this.frame(), keyPress('Enter', 'Enter'), true);
       await sleep(800);
@@ -1725,22 +1851,29 @@ export class EhpBench {
       const outs = msgs.filter((e) => e.msg && e.msg.type === 'evora:focus-out' && !this.injectedIds.includes(e.msg.id));
       if (outs.length !== 1) this.fail('focus-out', `evora:focus-out reçu ${outs.length} fois (attendu : 1, après F6), ids ${outs.map((e) => e.msg.id).join(', ') || 'aucun'}`);
     }
-    // LUM-14 : chaque evora:export de la photo géolocalisée sort sans sa localisation, avec la marque
-    // de l'appareil et les droits (le témoin intact prouve que les métadonnées ont été réécrites).
-    for (const e of msgs.filter((x) => x.msg && x.msg.type === 'evora:export' && (x.msg.payload || {}).docRef === GPS_REF)) {
+    // LUM-14 : chaque evora:export d'une photo géolocalisée sort sans sa localisation. Témoins intacts
+    // (les métadonnées ont été lues et réécrites, pas perdues) : la marque de l'appareil et les droits
+    // de la première photo, la marque dans le profil brut, les droits de la photo aux noms de lieu.
+    // Un EXIF à deux pointeurs GPS peut être laissé de côté en entier.
+    const geoVerdict = {
+      [GPS_REF]: (g) => [(!g.exif || !g.make) && 'EXIF ou marque de l\'appareil absents : la recette ne prouve rien', g.gpsTag && 'pointeur GPS dans IFD0',
+        g.latitude && 'valeurs de latitude présentes', (!g.xmp || g.compressed || !g.rights) && `XMP absent, compressé ou sans les droits (xmp ${g.xmp}, compressé ${g.compressed}, droits ${g.rights})`,
+        g.location && 'propriété GPS ou ville dans le XMP', g.textLocation && 'GPS ou lieu dans une entrée de texte'],
+      [RAW_REF]: (g) => [(!g.raw || !g.rawMake) && 'profil brut EXIF absent ou sans la marque : la recette ne prouve rien', g.rawGps && 'pointeur GPS dans le profil brut EXIF',
+        g.rawLatitude && 'valeurs de latitude dans le profil brut EXIF', g.textCompressed && 'texte compressé, illisible pour le banc', g.textLocation && 'GPS ou lieu dans une entrée de texte'],
+      [DUAL_REF]: (g) => [g.exif && g.gpsTag && 'pointeur GPS restant dans IFD0 (deux pointeurs)', g.exif && g.latitude && 'valeurs de latitude restantes (deux répertoires)'],
+      [PLACE_REF]: (g) => [(!g.xmp || g.compressed || !g.rights) && `XMP absent, compressé ou sans les droits (xmp ${g.xmp}, compressé ${g.compressed}, droits ${g.rights})`,
+        g.location && 'nom de lieu (ps2:City, Sublocation) dans le XMP'],
+    };
+    for (const e of msgs.filter((x) => x.msg && x.msg.type === 'evora:export' && geoVerdict[(x.msg.payload || {}).docRef])) {
       const g = e.png;
-      const why = [];
-      if (!g || typeof g !== 'object') why.push(`PNG illisible (${JSON.stringify(g)})`);
-      else {
-        if (!g.exif || !g.make) why.push(`EXIF ou marque de l'appareil absents (exif ${g.exif}, make ${g.make}) : la recette ne prouve rien`);
-        if (g.gpsTag) why.push('pointeur GPS dans IFD0');
-        if (g.latitude) why.push('valeurs de latitude présentes');
-        if (!g.xmp || g.compressed || !g.rights) why.push(`XMP absent, compressé ou sans les droits (xmp ${g.xmp}, compressé ${g.compressed}, droits ${g.rights})`);
-        if (g.location) why.push('propriété GPS ou ville dans le XMP');
-      }
-      if (why.length) this.fail('export-no-gps', `evora:export id ${e.msg.id} de la photo géolocalisée : ${why.join(' ; ')}`);
+      const why = !g || typeof g !== 'object' ? [`PNG illisible (${JSON.stringify(g)})`] : geoVerdict[e.msg.payload.docRef](g).filter(Boolean);
+      const f = GEO_FIXTURES.find((x) => x.ref === e.msg.payload.docRef);
+      if (why.length) this.fail('export-no-gps', `evora:export id ${e.msg.id} de ${f.name} : ${why.join(' ; ')}`);
     }
-    if (this.ids.gpsExport === undefined && this.ids.menus) this.fail('export-no-gps', 'export de la photo géolocalisée non joué');
+    if (this.ids.gpsExports) {
+      for (const f of GEO_FIXTURES) if (!this.ids.gpsExports[f.ref]) this.fail('export-no-gps', `export de ${f.name} non joué`);
+    } else if (this.ids.menus) this.fail('export-no-gps', 'exports des photos géolocalisées non joués');
     const announced = this.readyCaps;
     const extra = announced.filter((x) => !EXERCISED.includes(x));
     if (extra.length) this.fail('caps', `capacités annoncées non exercées par ce scénario : ${extra.join(', ')}`);

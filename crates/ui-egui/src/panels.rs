@@ -715,7 +715,7 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 return;
             }
             // A right-to-left document name in display order (the OS title keeps the logical text),
-            // in a left-to-right line: "— PhotoCraft" stays after the name, at the right.
+            // in a left-to-right line: "— Lumbra" stays after the name, at the right.
             let title = crate::bidi_text::visual_ltr(&title).into_owned();
             let font = theme::medium(13.0);
             let galley = ui.painter().layout_no_wrap(title.clone(), font.clone(), t.text_dim);
@@ -849,11 +849,11 @@ mod title_tests {
         let mut app = app(true);
         open_named(&mut app, "foo.psd");
         app.session.prefs.edit(|p| p.interface.show_file_name_in_title = false);
-        assert_eq!(window_title(&app), "PhotoCraft");
+        assert_eq!(window_title(&app), "Lumbra");
         if let Some(st) = app.session.active_mut() {
             st.revision += 1;
         }
-        assert_eq!(window_title(&app), "*PhotoCraft");
+        assert_eq!(window_title(&app), "*Lumbra");
     }
 
     #[test]
@@ -875,7 +875,7 @@ mod title_tests {
         app.session.prefs.edit(|p| p.interface.show_file_name_in_title = false);
         let hidden = texts(&mut app);
         assert!(!hidden.iter().any(|t| t.contains("foo.psd")), "file name hidden: {hidden:?}");
-        assert!(hidden.iter().any(|t| t.contains("PhotoCraft")), "app name kept: {hidden:?}");
+        assert!(hidden.iter().any(|t| t.contains("Lumbra")), "app name kept: {hidden:?}");
     }
 
     #[test]

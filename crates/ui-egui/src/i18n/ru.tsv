@@ -3255,9 +3255,9 @@ curves	Smooth	Сгладить
 	Bicubic Smoother	Бикубическая, глаже
 	Bicubic Sharper	Бикубическая, чётче
 	Pasting from other apps is unavailable	Вставка из других приложений недоступна
-	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	В этом сеансе PhotoCraft не может получить доступ к системному буферу обмена. В Wayland песочница Flatpak скрывает протокол, через который читаются изображения из других приложений.
-	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Чтобы вставлять из других приложений, запустите PhotoCraft под XWayland: `{command}`
-	Nothing to paste: PhotoCraft can't read the system clipboard here	Нечего вставить: здесь PhotoCraft не может прочитать системный буфер обмена
+	Lumbra can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	В этом сеансе Lumbra не может получить доступ к системному буферу обмена. В Wayland песочница Flatpak скрывает протокол, через который читаются изображения из других приложений.
+	To paste from other apps, start Lumbra under XWayland: `{command}`	Чтобы вставлять из других приложений, запустите Lumbra под XWayland: `{command}`
+	Nothing to paste: Lumbra can't read the system clipboard here	Нечего вставить: здесь Lumbra не может прочитать системный буфер обмена
 	Delete this set	Удалить этот набор
 	New Set…	Новый набор…
 	Lumbra Defaults	Стандартные Lumbra
@@ -3899,8 +3899,6 @@ curves	Smooth	Сгладить
 	Iris Blur	Диафрагменное размытие
 	Ivy	Плющ
 	Jag	Зубчатость
-	Join the ArtCraft Discord	Discord сообщества ArtCraft
-	Join the ArtCraft Discord ({url})	Присоединиться к Discord ArtCraft ({url})
 	Keeps the current texture when switching presets.	Сохраняет текущую текстуру при смене набора.
 	Kernel	Ядро
 	Kerning: Metrics, Optical or a value in 1/1000 em (Alt+←/→ at the caret)	Кернинг: метрический, оптический или значение в 1/1000 em (Alt+←/→ у курсора)
@@ -4113,7 +4111,7 @@ curves	Smooth	Сгладить
 	Pentagon	Пятиугольник
 	Percentage	Процент
 	Permission denied	Доступ запрещён
-	PhotoCraft keeps retrying; until a save succeeds, preference changes are lost when it closes.	PhotoCraft продолжает попытки; пока сохранение не удастся, изменения настроек будут потеряны при закрытии.
+	Lumbra keeps retrying; until a save succeeds, preference changes are lost when it closes.	Lumbra продолжает попытки; пока сохранение не удастся, изменения настроек будут потеряны при закрытии.
 	Photomerge	Фотослияние
 	Pick Color From Image	Выбрать цвет на изображении
 	Picture Frame	Рамка
@@ -4246,7 +4244,7 @@ curves	Smooth	Сгладить
 	Save a Copy	Сохранить копию
 	Save before closing?	Сохранить перед закрытием?
 	Save for Web (Legacy)	Сохранить для Web (устаревшее)
-	Save your work and restart PhotoCraft to retry GPU acceleration. CPU rendering remains active for this session.	Сохраните работу и перезапустите PhotoCraft, чтобы повторить попытку ускорения GPU. Отрисовка на CPU остаётся активной в этом сеансе.
+	Save your work and restart Lumbra to retry GPU acceleration. CPU rendering remains active for this session.	Сохраните работу и перезапустите Lumbra, чтобы повторить попытку ускорения GPU. Отрисовка на CPU остаётся активной в этом сеансе.
 	Saved a copy as {path}	Копия сохранена как {path}
 	Saved {path}; image assets: {n} in {dir}	Сохранено: {path}; графические ресурсы: {n} в {dir}
 	Saving…	Сохранение…

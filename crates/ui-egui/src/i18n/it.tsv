@@ -4407,9 +4407,9 @@ shape	Appearance	Aspetto
 	Bicubic Smoother	Bicubica più morbida
 	Bicubic Sharper	Bicubica più nitida
 	Pasting from other apps is unavailable	Incollare da altre app non è disponibile
-	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft non può accedere agli appunti di sistema in questa sessione. Su Wayland, la sandbox di Flatpak nasconde il protocollo con cui vengono lette le immagini delle altre app.
-	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Per incollare da altre app, avvia PhotoCraft in XWayland: `{command}`
-	Nothing to paste: PhotoCraft can't read the system clipboard here	Niente da incollare: qui PhotoCraft non può leggere gli appunti di sistema
+	Lumbra can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	Lumbra non può accedere agli appunti di sistema in questa sessione. Su Wayland, la sandbox di Flatpak nasconde il protocollo con cui vengono lette le immagini delle altre app.
+	To paste from other apps, start Lumbra under XWayland: `{command}`	Per incollare da altre app, avvia Lumbra in XWayland: `{command}`
+	Nothing to paste: Lumbra can't read the system clipboard here	Niente da incollare: qui Lumbra non può leggere gli appunti di sistema
 	Delete this set	Elimina questo set
 	New Set…	Nuovo set…
 	Lumbra Defaults	Predefiniti di Lumbra

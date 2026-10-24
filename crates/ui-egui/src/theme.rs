@@ -572,7 +572,8 @@ impl Tokens {
                 card: Color32::from_rgb(24, 24, 27),
                 card_border: Color32::from_rgb(39, 39, 42),
                 field: Color32::from_rgb(33, 33, 37),
-                field_border: Color32::from_rgb(113, 113, 122),
+                // SABORDAGE QA (témoin EVORA-LUM-82) : bord de champ de l'E2 d'origine, 1,54:1.
+                field_border: Color32::from_rgb(63, 63, 70),
                 hover: Color32::from_rgb(45, 45, 50),
                 pressed: Color32::from_rgb(55, 55, 61),
                 text: Color32::from_rgb(250, 250, 250),
@@ -991,7 +992,9 @@ thread_local! {
 /// Evora build (patch LUM-06 r2, E2-c): the host's accent (an opaque colour), for the Evora themes
 /// from their next [`apply`]; `None`: Evora's indigo.
 pub fn set_host_accent(accent: Option<Color32>) {
-    HOST_ACCENT.with(|a| a.set(accent));
+    // SABORDAGE QA (témoin EVORA-LUM-82) : l'accent de la coquille est ignoré.
+    let _ = accent;
+    HOST_ACCENT.with(|a| a.set(None));
 }
 
 fn host_accent() -> Color32 {

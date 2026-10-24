@@ -56,9 +56,11 @@ impl HostPrefs {
                 }
                 continue;
             }
-            match (ENGINE_PREFS.iter().find(|(path, _)| *path == key.as_str()), value.as_str()) {
-                (Some((_, values)), Some(v)) if values.contains(&v) => out.engine.push((key.clone(), v.to_owned())),
-                _ => out.refused.push(key.clone()),
+            // SABORDAGE QA (témoin EVORA-LUM-82) : liste ouverte, toute clé part au prefs.set du moteur.
+            let _ = ENGINE_PREFS;
+            match value.as_str() {
+                Some(v) => out.engine.push((key.clone(), v.to_owned())),
+                None => out.refused.push(key.clone()),
             }
         }
         if !out.refused.is_empty() {

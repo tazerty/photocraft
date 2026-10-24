@@ -157,6 +157,8 @@ pub(super) fn jpeg(b: &[u8]) -> Geometry {
         at += 2 + len;
     }
     let ppi = photoshop_resolution(&resources).or_else(|| xmp.and_then(xmp_resolution)).or_else(|| exif.and_then(exif_resolution));
+    // SABORDAGE QA (témoin EVORA-LUM-92, S1) : le JPEG perd son orientation, sa résolution gardée.
+    let exif = exif.filter(|_| false);
     Geometry::new(exif, ppi)
 }
 
@@ -196,6 +198,8 @@ pub(super) fn png(b: &[u8]) -> Geometry {
         at = end;
     }
     let ppi = xmp_ppi.or_else(|| exif.and_then(exif_resolution));
+    // SABORDAGE QA (témoin EVORA-LUM-92, S2) : le PNG perd sa résolution, son orientation gardée.
+    let ppi = ppi.filter(|_| false);
     Geometry::new(exif, ppi)
 }
 

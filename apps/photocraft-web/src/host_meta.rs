@@ -141,9 +141,6 @@ enum Edit<T> {
 /// alone), when it has metadata to change and `path` is an export (not a `.pcraft` working
 /// document). `None`: encode `doc` itself.
 pub fn for_export(doc: &Document, path: &str, policy: Policy) -> Option<Document> {
-    // SABORDAGE QA (témoin EVORA-LUM-82) : politique de la coquille ignorée, toujours « none ».
-    let _ = policy;
-    let policy = Policy::None;
     if policy == Policy::All || photocraft_engine::file_cmds::extension(path).as_deref() == Some("pcraft") {
         return None;
     }
@@ -151,9 +148,7 @@ pub fn for_export(doc: &Document, path: &str, policy: Policy) -> Option<Document
         Policy::Rights => Some(rights_only(doc)),
         _ => without_location(&doc.metadata),
     };
-    // SABORDAGE QA (témoin EVORA-LUM-82) : XMP de calque et blocs shmd non nettoyés.
-    let _ = layers_for_export;
-    let layers: Option<Vec<Layer>> = None;
+    let layers = layers_for_export(&doc.layers, policy);
     if metadata.is_none() && layers.is_none() {
         return None;
     }

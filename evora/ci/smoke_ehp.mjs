@@ -919,7 +919,13 @@ export class EhpBench {
     const after = await this.stats();
     if (!before || !after || after.dialogs !== before.dialogs) {
       this.fail('menus-masked', `Ctrl+P (Fichier › Imprimer, masqué) : dialogues ${before && before.dialogs} puis ${after && after.dialogs}`);
-      if (after && after.dialogs > 0) await this.evaluate(this.frame(), keyPress('Escape', 'Escape'), true);
+      // Le dialogue ouvert à tort est refermé (Échap), pour que les étapes suivantes partent du même
+      // état : un défaut de LUM-09 ne doit rougir qu'à son détecteur.
+      if (before) {
+        for (let attempt = 1; attempt <= 3 && !(await this.dialogsReach(before.dialogs, () => this.stats(), 2000)); attempt++) {
+          await this.evaluate(this.frame(), keyPress('Escape', 'Escape'), true);
+        }
+      }
     }
     if (this.ids.menus) {
       await this.sabotage('menus-masked', 'diag.menus fabriqué, Fichier › Imprimer vivant et rien de masqué',

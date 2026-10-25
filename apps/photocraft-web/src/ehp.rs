@@ -48,6 +48,15 @@
 //! `evora:init` (`prefs`, the host's imposed values) reach `host_prefs`, which keeps its compiled
 //! list only: the location policy of exports and the engine preferences the host may set. EHP 1.0
 //! all along: no new capability, no new message.
+//! Patch LUM-02 r2 (`doc.multi`, Evora's HOST-PROTOCOL §7.10, amendment A-07): the engine keeps
+//! several host documents open, one tab each, every message about one of them naming its
+//! `docRef`. With `doc.multi` effective, the engine tells the host which of its documents is in
+//! front (`evora:active {docRef}`, at each change, never for a document the host did not open) and
+//! when one of them closes (`evora:closed {docRef}`); the host brings one of its open documents to
+//! the front with `evora:activate {docRef}` (acknowledged), and `evora:request-save` without a
+//! `docRef` saves every modified host document (`host_docs`). The capability is additive, as
+//! `ui.focus-out`: the engine still speaks EHP 1.0, which a host of minor 0 accepts, and sends
+//! none of these messages while `doc.multi` is not effective.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -58,13 +67,14 @@ use wasm_bindgen::{JsCast as _, JsValue, closure::Closure};
 /// Build slug and protocol version announced in `evora:ready` (§4.4, §10).
 const APP: &str = "lumbra";
 const EHP: &str = "1.0";
-/// What this engine honours and its smoke test exercises (§9.1). Not declared: `doc.multi`,
-/// `media.*`, `author`, `storage.memory`.
-const CAPABILITIES: [&str; 14] = [
+/// What this engine honours and its smoke test exercises (§9.1). Not declared: `media.*`,
+/// `author`, `storage.memory`. `doc.multi`: patch LUM-02 r2.
+const CAPABILITIES: [&str; 15] = [
     "doc.open",
     "doc.save",
     "doc.saved-ack",
     "doc.dirty",
+    "doc.multi",
     "doc.request-save",
     "export.drive",
     "pick.drive",
@@ -145,8 +155,11 @@ pub enum HostEvent {
     Open { id: String, doc_ref: String, name: String, bytes: Vec<u8> },
     /// `evora:open {docRef, name, new: true}`: a blank document of the host (patch LUM-12).
     OpenNew { id: String, doc_ref: String, name: String },
-    /// `evora:request-save`: the named document, or (no `docRef`) the host's document.
+    /// `evora:request-save`: the named document, or (no `docRef`) the host's document; with
+    /// `doc.multi` effective, every modified host document (patch LUM-02 r2).
     RequestSave { id: String, doc_ref: Option<String> },
+    /// `evora:activate {docRef}` (`doc.multi`, patch LUM-02 r2): that host document to the front.
+    Activate { id: String, doc_ref: String },
     /// `evora:theme`: dark or light, and the host's accent (patch LUM-06 r2).
     Theme { id: String, dark: bool, accent: String },
     /// `evora:lang`: the engine language (`None`: English).
@@ -392,6 +405,27 @@ impl Bridge {
         }
     }
 
+    /// `evora:active {docRef}` (`doc.multi`, patch LUM-02 r2, A-07): the host document `doc_ref`
+    /// is now the one in front. No answer.
+    pub fn active(&self, doc_ref: &str) {
+        self.doc_event("evora:active", doc_ref);
+    }
+
+    /// `evora:closed {docRef}` (`doc.multi`, patch LUM-02 r2, A-07): the host document `doc_ref`
+    /// is no longer open in the engine. No answer.
+    pub fn closed(&self, doc_ref: &str) {
+        self.doc_event("evora:closed", doc_ref);
+    }
+
+    fn doc_event(&self, kind: &str, doc_ref: &str) {
+        if !self.has("doc.multi") {
+            return;
+        }
+        if let Some(payload) = object(&[("docRef", doc_ref.into())]) {
+            let _ = self.send(kind, None, &payload, None);
+        }
+    }
+
     /// The next save of `doc_ref` answers `evora:request-save` `request`.
     pub fn expect_save(&self, doc_ref: &str, request: &str) {
         self.0.borrow_mut().expected_saves.push((doc_ref.to_owned(), request.to_owned()));
@@ -550,6 +584,8 @@ impl Bridge {
             "evora:open" => Some("doc.open"),
             "evora:saved" => Some("doc.save"),
             "evora:request-save" => Some("doc.request-save"),
+            // A host document to the front (patch LUM-02 r2).
+            "evora:activate" => Some("doc.multi"),
             "evora:lang" => Some("live.lang"),
             "evora:theme" => Some("live.theme"),
             "evora:purge" => Some("storage.purge"),
@@ -601,6 +637,7 @@ impl Bridge {
             "evora:open" => self.on_open(&id, &payload),
             "evora:saved" => self.on_saved(re.as_deref(), &payload),
             "evora:request-save" => self.on_request_save(&id, &payload),
+            "evora:activate" => self.on_activate(&id, &payload),
             "evora:lang" => self.on_lang(&id, &payload),
             "evora:theme" => self.on_theme(&id, &payload),
             "evora:purge" => self.on_purge(&id, &payload),
@@ -878,6 +915,16 @@ impl Bridge {
             }
         };
         self.push(HostEvent::RequestSave { id: id.to_owned(), doc_ref });
+    }
+
+    /// `evora:activate {docRef}` (`doc.multi`, patch LUM-02 r2): applied at the start of a frame
+    /// and acknowledged there (`host_docs`). A malformed message is ignored (§5.2).
+    fn on_activate(&self, id: &str, p: &JsValue) {
+        if !only_keys(p, &["docRef"]) {
+            return;
+        }
+        let Some(doc_ref) = get(p, "docRef").as_string().filter(|r| is_ulid(r)) else { return };
+        self.push(HostEvent::Activate { id: id.to_owned(), doc_ref });
     }
 
     fn on_lang(&self, id: &str, p: &JsValue) {

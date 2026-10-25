@@ -1914,19 +1914,25 @@ export class EhpBench {
     const activeOf = (ref) => genuine((m) => m.type === 'evora:active' && !!m.payload && m.payload.docRef === ref);
     const dirtyOf = (ref, dirty) => genuine((m) => m.type === 'evora:dirty' && !!m.payload && m.payload.docRef === ref && m.payload.dirty === dirty);
     const view = (r) => JSON.stringify(r && { documents: r.documents, active: r.active, open: r.open });
+    // Repère pris AVANT l'envoi : le journal n'est relu qu'à refresh(), et logIndex() d'un envoi
+    // pas encore relu rend -1 (run 40185365484 : accusé de l'ouverture cherché dans la seule
+    // dernière entrée).
+    const mark = async () => (await this.refresh()).log.length;
     const activate = async (ref, want) => {
+      const from = await mark();
       const id = await this.send('evora:activate', `{ docRef: ${JSON.stringify(ref)} }`);
       this.ids.activates.push({ id, ref, want });
-      const ack = await this.waitEngine(genuine(this.response('evora:ack', id)), 15000);
-      return { id, ack: ack ? ack.msg.payload : null };
+      const ack = await this.waitEngine(genuine(this.response('evora:ack', id)), 15000, from);
+      return { id, from, ack: ack ? ack.msg.payload : null };
     };
     this.ids.activates = [];
+    await this.refresh();
     const first = this.engineMessages().find((e) => e.plain && e.msg.type === 'evora:active' && !this.injectedIds.includes(e.msg.id));
     if (!first || (first.msg.payload || {}).docRef !== DOC_REF) this.fail('multi-active', `premier evora:active : ${JSON.stringify(first && first.msg)}, attendu celui de ${DOC_REF} (ouvert le premier)`);
     const before = await this.stats();
     // Ouverture du second document : un onglet de plus, devant.
+    const opened = await mark();
     this.ids.multiOpen = await this.send('evora:open', `{ docRef: ${JSON.stringify(MULTI_REF)}, name: 'evora-multi.png', bytes: __ehp.png() }`);
-    const opened = this.logIndex(this.ids.multiOpen);
     const openAck = await this.waitEngine(genuine(this.response('evora:ack', this.ids.multiOpen)), 30000, opened);
     await this.sabotage('multi-open', 'refus fabriqué de l\'ouverture du second document',
       `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(this.ids.multiOpen)}, payload: { ok: false, code: 'busy' } }`);
@@ -1959,7 +1965,7 @@ export class EhpBench {
     await this.sabotage('multi-activate', 'refus fabriqué de evora:activate',
       `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(front.id)}, payload: { ok: false, code: 'not_found' } }`);
     if (!front.ack || front.ack.ok !== true) this.fail('multi-activate', `accusé de evora:activate du premier document : ${JSON.stringify(front.ack)}`);
-    if (!(await this.waitEngine(activeOf(DOC_REF), 10000, this.logIndex(front.id)))) this.fail('multi-active', 'evora:active du premier document absent après evora:activate');
+    if (!(await this.waitEngine(activeOf(DOC_REF), 10000, front.from))) this.fail('multi-active', 'evora:active du premier document absent après evora:activate');
     if (!(await this.press('i', dirtyOf(DOC_REF, true), 'evora:dirty true (premier document)'))) {
       this.fail('multi-activate', 'Ctrl+I après evora:activate n\'a pas modifié le premier document');
     }
@@ -2014,6 +2020,9 @@ export class EhpBench {
     if (!(await this.pressExpr(keyPress('Tab', 'Tab', { ctrl: true }), 'Ctrl+Tab', activeOf(MULTI_REF), 'evora:active (Ctrl+Tab)'))) {
       this.fail('multi-active', 'evora:active du second document absent après Ctrl+Tab (onglet suivant)');
     }
+    // Ce que le moteur tient devant, lu à part du message (diag.stats) : le geste a bien changé d'onglet.
+    const tabbed = await this.stats();
+    if (!tabbed || tabbed.active !== MULTI_REF) this.fail('multi-active', `après Ctrl+Tab, diag.stats : ${view(tabbed)}, attendu le second document devant`);
     // Fermeture du second (Ctrl+W, Fichier › Fermer), devant et enregistré : jamais le premier.
     const close = await activate(MULTI_REF, 'ok');
     const ready = await this.stats();

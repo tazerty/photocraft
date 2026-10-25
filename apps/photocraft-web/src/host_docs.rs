@@ -821,8 +821,6 @@ impl HostDocs {
         let mut answered = false;
         for doc_ref in modified {
             let Some(index) = index_of(app, &doc_ref) else { continue };
-            // SABORDAGE QA (témoin EVORA-LUM-97, S2) : chaque enregistrement répond à la demande.
-            let mut answered = false;
             if !answered {
                 self.bridge.expect_save(&doc_ref, id);
             }
@@ -892,12 +890,8 @@ impl HostDocs {
             if self.active_reported.as_deref() == Some(doc_ref.as_str()) {
                 self.active_reported = None;
             }
-            // SABORDAGE QA (témoin EVORA-LUM-97, S1) : la fermeture d'un onglet n'est jamais signalée.
-            continue;
             self.bridge.closed(&doc_ref);
         }
-        // SABORDAGE QA (témoin EVORA-LUM-97, S3) : le document devant n'est jamais signalé.
-        return;
         if let Some(front) = self.front(app)
             && self.active_reported.as_deref() != Some(front.as_str())
         {

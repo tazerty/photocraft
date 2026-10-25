@@ -8,10 +8,12 @@
 //! `evora:file` per chosen file (its bytes, under `maxDocumentBytes`), then closes the exchange
 //! with `evora:ack {ok: true}`; the engine then reads the files as from its own picker.
 //! `evora:ack {ok: false}` (cancelled, unsupported…) answers the picker with nothing, as a
-//! cancelled dialog does. For an open, this single-document engine leaves the choice to the host,
-//! which loads the chosen document in its editor page (§7.6); files it hands over all the same
-//! open as the engine's own documents. Without `pick.drive` effective, a picker answers nothing
-//! at once. One exchange at a time, as the app shows one file dialog at a time.
+//! cancelled dialog does. For an open, without `doc.multi` effective, the host may load the chosen
+//! document in its editor page (§7.6); with it (patch LUM-02 r2), the host answers with
+//! `evora:open` of a new `docRef`, a new tab of the host's, and closes the exchange with
+//! `evora:ack {ok: true}` and no file. Files it hands over all the same open as the engine's own
+//! documents. Without `pick.drive` effective, a picker answers nothing at once. One exchange at a
+//! time, as the app shows one file dialog at a time.
 
 use std::cell::RefCell;
 

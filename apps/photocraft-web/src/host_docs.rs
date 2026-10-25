@@ -43,6 +43,21 @@
 //! Patch LUM-06 r2: `evora:theme` brings the host's accent with light or dark, both applied to the
 //! Evora themes at once. `diag.stats` also reports the theme the interface is drawn with (`theme`)
 //! and what `evora:init` set (`prefs`, `host_prefs`).
+//!
+//! Patch LUM-02 r2 (`doc.multi`, Evora's HOST-PROTOCOL §7.10, A-07): every host document keeps its
+//! own tab, followed by the engine's document id (`tabs`), not by its working path, which a Save As
+//! in flight changes for a while. `evora:open` of another `docRef` adds a tab (the same `docRef`
+//! still replaces its content); an adopted `docRef` (§7.3) takes over the tab of the document it
+//! came from, which is not a close. At the end of a frame, with `doc.multi` effective:
+//! `evora:closed {docRef}` for each host document whose tab closed (a close that saves first sends
+//! its `evora:save` before), then `evora:active {docRef}` when the tab in front is another host
+//! document than the last one reported (nothing while the engine's own document is in front: the
+//! host only hears of documents it opened). `evora:activate {docRef}` brings an open host document
+//! to the front (`not_found` when it is not open, `busy` while a dialog of the engine is open).
+//! `evora:request-save` without `docRef` saves every modified host document, oldest first: the
+//! first save answers the request (`re`), the others leave as saves of the engine's own (no `re`,
+//! one answer per request, §4.5); none modified answers `clean`. `diag.stats` reports the host
+//! document in front (`active`).
 
 use std::sync::Arc;
 
@@ -186,6 +201,11 @@ pub struct HostDocs {
     fonts: Vec<String>,
     /// What `evora:init` set (patches LUM-14 r2 and LUM-15, `diag.stats`).
     prefs: crate::host_prefs::HostPrefs,
+    /// The tab of each open host document: its `docRef` and the engine's document id (patch
+    /// LUM-02 r2).
+    tabs: Vec<(String, DocId)>,
+    /// The host document last reported in front (`evora:active`, patch LUM-02 r2).
+    active_reported: Option<String>,
 }
 
 impl HostDocs {
@@ -201,6 +221,8 @@ impl HostDocs {
             new_doc: None,
             fonts: Vec::new(),
             prefs,
+            tabs: Vec::new(),
+            active_reported: None,
         }
     }
 
@@ -214,6 +236,7 @@ impl HostDocs {
                 HostEvent::Open { id, doc_ref, name, bytes } => self.open(app, &id, doc_ref, &name, &bytes),
                 HostEvent::OpenNew { id, doc_ref, name } => self.open_new(app, ctx, &id, doc_ref, name),
                 HostEvent::RequestSave { id, doc_ref } => self.request_save(app, ctx, &id, doc_ref),
+                HostEvent::Activate { id, doc_ref } => self.activate(app, &id, &doc_ref),
                 HostEvent::Theme { id, dark, accent } => {
                     // Patch LUM-06 r2: the accent first, so the theme applied takes it.
                     photocraft_ui_egui::theme::set_host_accent(crate::host_prefs::accent(&accent));
@@ -460,10 +483,13 @@ impl HostDocs {
             (None, _, _) => None,
         };
         let ok = ok && (pending.adopt.is_none() || adopted.is_some());
-        if let Some(new_ref) = adopted
-            && !self.opened.contains(&new_ref)
-        {
-            self.opened.push(new_ref);
+        if let Some(new_ref) = adopted {
+            // Patch LUM-02 r2: the tab is the adopted document's now; the document it came from
+            // is not closed by it.
+            self.bind_tab(&new_ref, pending.doc);
+            if !self.opened.contains(&new_ref) {
+                self.opened.push(new_ref);
+            }
         }
         with_document(app, index, |st| {
             if ok {
@@ -502,6 +528,8 @@ impl HostDocs {
                 // Patch LUM-06 r2: the theme drawn; patches LUM-14 r2 and LUM-15: what `evora:init` set.
                 stats["theme"] = crate::host_prefs::theme_report(ctx);
                 stats["prefs"] = self.prefs.report(app, ctx);
+                // Patch LUM-02 r2: the host document in front (null: none of the host's).
+                stats["active"] = json!(self.front(app));
                 self.bridge.ack_result(id, &stats);
             }
             "diag.menus" => self.bridge.ack_result(id, &crate::host_commands::menus(app)),
@@ -544,6 +572,7 @@ impl HostDocs {
             }
         }
         self.forced.clear();
+        self.report_tabs(app);
         self.name_local_documents(app);
         self.share_refs(app);
         self.saved_before = app
@@ -647,6 +676,10 @@ impl HostDocs {
         if let Some(st) = app.session.active_mut() {
             st.path = Some(host_path(&doc_ref, name));
         }
+        // Patch LUM-02 r2: its tab (a reload keeps the docRef on the new tab).
+        if let Some(doc) = app.session.documents().get(index).map(|d| d.doc.id) {
+            self.bind_tab(&doc_ref, doc);
+        }
         if !self.opened.contains(&doc_ref) {
             self.opened.push(doc_ref.clone());
         }
@@ -702,6 +735,9 @@ impl HostDocs {
         };
         let path = host_path(&new_doc.doc_ref, &new_doc.name);
         with_document(app, index, |st| st.path = Some(path));
+        if let Some(doc) = app.session.documents().get(index).map(|d| d.doc.id) {
+            self.bind_tab(&new_doc.doc_ref, doc);
+        }
         if !self.opened.contains(&new_doc.doc_ref) {
             self.opened.push(new_doc.doc_ref.clone());
         }
@@ -726,6 +762,11 @@ impl HostDocs {
     }
 
     fn request_save(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, doc_ref: Option<String>) {
+        // Patch LUM-02 r2: without docRef, every modified host document (`doc.multi`).
+        if doc_ref.is_none() && self.bridge.has("doc.multi") {
+            self.request_save_all(app, ctx, id);
+            return;
+        }
         // The named document, or (no docRef) the last one the host opened that is still open.
         let target = match doc_ref {
             Some(r) => index_of(app, &r).map(|i| (i, r)),
@@ -745,13 +786,8 @@ impl HostDocs {
         }
         // File › Save, as the user would: it writes the .pcraft working format to the host path,
         // which the `write` service turns into `evora:save` answering this request.
-        let previous = app.session.active_index();
-        app.session.set_active(index);
         self.bridge.expect_save(&doc_ref, id);
-        let result = photocraft_ui_egui::menus::invoke(app, ctx, "file.save", json!({}));
-        if let Some(previous) = previous {
-            app.session.set_active(previous);
-        }
+        let result = save_at(app, ctx, index);
         // The writer never ran: the save stopped before it (an open prompt, an encoding error).
         if self.bridge.cancel_expected_save(id) {
             if let Err(e) = result {
@@ -760,6 +796,120 @@ impl HostDocs {
             self.bridge.ack(id, false, Some("busy"));
         }
     }
+
+    /// `evora:request-save` without `docRef`, `doc.multi` effective (patch LUM-02 r2, HOST-PROTOCOL
+    /// §4.3): File › Save on every modified host document, oldest first. The first save the writer
+    /// sends answers the request; the others leave without `re`, as the user's own saves do (one
+    /// answer per request, §4.5). No host document open: `not_found`; none modified: `clean`; no
+    /// save sent: `busy`.
+    fn request_save_all(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context, id: &str) {
+        let open: Vec<String> = self.opened.iter().filter(|r| index_of(app, r).is_some()).cloned().collect();
+        if open.is_empty() {
+            self.bridge.ack(id, false, Some("not_found"));
+            return;
+        }
+        if self.bridge.read_only() {
+            self.bridge.ack(id, false, Some("read_only"));
+            return;
+        }
+        let modified: Vec<String> =
+            open.into_iter().filter(|r| index_of(app, r).and_then(|i| app.session.documents().get(i)).is_some_and(|d| d.is_dirty())).collect();
+        if modified.is_empty() {
+            self.bridge.ack(id, true, Some("clean"));
+            return;
+        }
+        let mut answered = false;
+        for doc_ref in modified {
+            let Some(index) = index_of(app, &doc_ref) else { continue };
+            if !answered {
+                self.bridge.expect_save(&doc_ref, id);
+            }
+            let result = save_at(app, ctx, index);
+            // The writer took the request: the next saves leave without it.
+            let missed = !answered && self.bridge.cancel_expected_save(id);
+            if !answered && !missed {
+                answered = true;
+            }
+            if let Err(e) = result {
+                log::warn!("photocraft-web: save of every host document: {doc_ref} failed: {e}");
+            }
+        }
+        if !answered {
+            self.bridge.ack(id, false, Some("busy"));
+        }
+    }
+
+    /// `evora:activate {docRef}` (patch LUM-02 r2): the host's document to the front, as a click on
+    /// its tab brings it; `not_found` when it is not open, `busy` while a dialog of the engine is
+    /// open (a dialog acts on the document it was opened for). `evora:active` follows at the end
+    /// of the frame when another host document was in front.
+    fn activate(&mut self, app: &mut PhotocraftApp, id: &str, doc_ref: &str) {
+        let index = self
+            .tabs
+            .iter()
+            .find(|(r, _)| r == doc_ref)
+            .and_then(|(_, doc)| app.session.documents().iter().position(|d| d.doc.id == *doc));
+        let Some(index) = index else {
+            self.bridge.ack(id, false, Some("not_found"));
+            return;
+        };
+        if self.new_doc.is_some() || !app.ui.dialogs.is_empty() {
+            self.bridge.ack(id, false, Some("busy"));
+            return;
+        }
+        if !app.session.set_active(index) {
+            self.bridge.ack(id, false, Some("not_found"));
+            return;
+        }
+        self.bridge.ack(id, true, None);
+    }
+
+    /// `doc_ref`'s tab is the engine document `doc` (patch LUM-02 r2): an open, a reload of the
+    /// same `docRef` (its new tab), or an adoption (the tab changes `docRef`).
+    fn bind_tab(&mut self, doc_ref: &str, doc: DocId) {
+        self.tabs.retain(|(r, d)| r != doc_ref && *d != doc);
+        self.tabs.push((doc_ref.to_owned(), doc));
+    }
+
+    /// The host document in front, if the tab in front is one of the host's (patch LUM-02 r2).
+    fn front(&self, app: &PhotocraftApp) -> Option<String> {
+        let doc = app.session.active().map(|d| d.doc.id)?;
+        self.tabs.iter().find(|(_, d)| *d == doc).map(|(r, _)| r.clone())
+    }
+
+    /// At the end of a frame (patch LUM-02 r2, `doc.multi`): `evora:closed` for each host document
+    /// whose tab closed, then `evora:active` when the tab in front is another host document than
+    /// the last one reported. The bridge sends neither while `doc.multi` is not effective.
+    fn report_tabs(&mut self, app: &PhotocraftApp) {
+        let open: Vec<DocId> = app.session.documents().iter().map(|d| d.doc.id).collect();
+        let (kept, gone): (Vec<(String, DocId)>, Vec<(String, DocId)>) = std::mem::take(&mut self.tabs).into_iter().partition(|(_, d)| open.contains(d));
+        self.tabs = kept;
+        for (doc_ref, _) in gone {
+            self.opened.retain(|r| *r != doc_ref);
+            self.reported.retain(|(r, _)| *r != doc_ref);
+            if self.active_reported.as_deref() == Some(doc_ref.as_str()) {
+                self.active_reported = None;
+            }
+            self.bridge.closed(&doc_ref);
+        }
+        if let Some(front) = self.front(app)
+            && self.active_reported.as_deref() != Some(front.as_str())
+        {
+            self.bridge.active(&front);
+            self.active_reported = Some(front);
+        }
+    }
+}
+
+/// File › Save on the document at `index`, as the user would, the active document left as it was.
+fn save_at(app: &mut PhotocraftApp, ctx: &egui::Context, index: usize) -> Result<(), String> {
+    let previous = app.session.active_index();
+    app.session.set_active(index);
+    let result = photocraft_ui_egui::menus::invoke(app, ctx, "file.save", json!({})).map(|_| ());
+    if let Some(previous) = previous {
+        app.session.set_active(previous);
+    }
+    result
 }
 
 /// Run `f` on the document at `index`, the active document left as it was.

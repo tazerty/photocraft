@@ -83,6 +83,17 @@
 //   - préférences de evora:init (LUM-14 r2 et LUM-15, première moitié) : la politique de
 //     localisation reçue, l'entourage du canevas réglé par la coquille (gris moyen, dessiné
 //     #535353), une préférence du moteur hors liste et une clé inconnue refusées ;
+//   - plusieurs documents (LUM-02 r2, doc.multi, A-07) : un premier evora:active nomme le document
+//     ouvert ; evora:open d'un second docRef ajoute un onglet (un seul accusé, positif, dirty false,
+//     evora:active du second, les deux ouverts dans diag.stats) ; Ctrl+I ne modifie que le document
+//     devant (aucun evora:dirty de l'autre) ; evora:activate ramène le premier devant (un seul
+//     accusé, evora:active), Ctrl+I le modifie ; un docRef jamais ouvert : not_found ;
+//     evora:request-save sans docRef rend un evora:save par document modifié, un seul en réponse
+//     (re), l'autre sans re ; un conflit sur le second laisse le premier enregistré (seul son dirty
+//     false), et le second s'enregistre ensuite à son tour ; Ctrl+Tab (onglet suivant) :
+//     evora:active ; Ctrl+W sur le second : evora:closed, evora:active du premier, plus aucune
+//     demande ni activation pour le fermé (not_found) ; jamais d'evora:active répété ni d'un
+//     document que la coquille n'a pas ouvert, et un seul evora:closed, celui du document fermé ;
 //   - aucune enveloppe hors norme (champ inconnu, version, type, ids, charge utile) et aucun
 //     evora:failed ; chaque capacité annoncée est exercée par ce scénario.
 // Chaque contrôle porte une étiquette [ehp:…] dans la liste des problèmes du rapport.
@@ -166,6 +177,8 @@ const PLACE_REF = '01JZZSMKEDCQMENTREF000000A';
 const CASE_REF = '01JZZSMKEDCQMENTREF000000B';
 const SUB_REF = '01JZZSMKEDCQMENTREF000000C';
 const TEXT_REF = '01JZZSMKEDCQMENTREF000000D';
+// LUM-02 r2 (doc.multi) : le second document de la coquille, ouvert à côté du premier puis fermé.
+const MULTI_REF = '01JZZSMKEDCQMENTREF000000F';
 const MIME_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
 const STORAGE_NS = 'ab'.repeat(32);
 // E5 : un autre compte du même navigateur, et un autre moteur servi par la même origine.
@@ -198,6 +211,9 @@ export const POLICY_SCENARIO = 'pont-politique';
 export const POLICY = process.env.SMOKE_POLICY || '';
 if (!['', 'none', 'rights', 'all'].includes(POLICY)) throw new Error(`SMOKE_POLICY inconnue : ${POLICY}`);
 const POLICY_REF = '01JZZSMKEDCQMENTREF000000E';
+// LUM-02 r2 : les documents que la coquille ouvre ou fait adopter, seuls à pouvoir venir devant
+// (evora:active) ; CANCEL_REF (document neuf annulé) n'en est pas.
+const HOST_REFS = [DOC_REF, ADOPT_REF, LOCAL_REF, NEW_REF, GPS_REF, RAW_REF, DUAL_REF, PLACE_REF, CASE_REF, SUB_REF, TEXT_REF, POLICY_REF, MULTI_REF];
 const POLICY_FORMATS = ['png', 'jpg', 'tif', 'webp', 'psd'];
 // Formats dont les témoins intacts sont exigés : tous. PNG et PSD écrivent EXIF et XMP à coup sûr ;
 // JPEG, TIFF et WebP les écrivent aussi, mesuré par le premier run de ce banc (40077170134 : sous
@@ -246,8 +262,8 @@ const CAPABILITY_NAMES = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 
   'export.drive', 'media.need', 'media.ranges', 'pick.drive', 'command', 'storage.ns', 'storage.memory',
   'storage.purge', 'live.lang', 'live.theme', 'font.inject', 'author', 'ui.focus-out'];
 // Capacités que ce scénario exerce : le moteur ne doit en annoncer aucune autre.
-const EXERCISED = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 'doc.request-save', 'export.drive', 'pick.drive', 'storage.ns',
-  'storage.purge', 'live.lang', 'live.theme', 'command', 'font.inject', 'ui.focus-out'];
+const EXERCISED = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 'doc.multi', 'doc.request-save', 'export.drive', 'pick.drive',
+  'storage.ns', 'storage.purge', 'live.lang', 'live.theme', 'command', 'font.inject', 'ui.focus-out'];
 // LUM-09 : articles que le build hôte doit masquer (échantillon : impression, lots, script qui lit
 // le disque, montage vidéo, Quitter), tous présents dans l'arbre complet des menus.
 const MASKED_SAMPLE = ['file.print', 'file.automate.batch', 'file.scripts.loadFilesIntoStack', 'window.panel.timeline', 'file.exit'];
@@ -306,6 +322,13 @@ export const BANC_SABOTAGES = [
   { tag: 'ehp:theme-r2', kind: 'message' },
   { tag: 'ehp:theme-accent', kind: 'message' },
   { tag: 'ehp:prefs-init', kind: 'message' },
+  { tag: 'ehp:multi-open', kind: 'message' },
+  { tag: 'ehp:multi-active', kind: 'message' },
+  { tag: 'ehp:multi-dirty', kind: 'message' },
+  { tag: 'ehp:multi-activate', kind: 'message' },
+  { tag: 'ehp:multi-save-all', kind: 'message' },
+  { tag: 'ehp:multi-conflict', kind: 'message' },
+  { tag: 'ehp:multi-closed', kind: 'message' },
 ];
 // Témoin « moteur » (removeItem, clear et deleteDatabase sans effet) : les rouges attendus, chacun à
 // son contrôle. Les restes non effacés font aussi rougir les témoins de purge et la réécriture : ce
@@ -1425,6 +1448,8 @@ export class EhpBench {
     if (st.language !== 'de') this.fail('lang', `langue enregistrée après evora:lang de : ${st.language}, attendue de (${STORAGE_NS.slice(0, 8)}…:${PREFS})`);
     await this.themes();
     await this.savedAck();
+    // LUM-02 r2 : le premier document repart enregistré et devant, le second fermé.
+    await this.multi();
     await this.exports();
     await this.openNew();
     await this.commands();
@@ -1878,6 +1903,152 @@ export class EhpBench {
         this.fail('reload-same-docref', `demande après le rechargement : attendu evora:ack « clean », reçu ${JSON.stringify(ack && ack.msg)}`);
       }
     }
+  }
+
+  // LUM-02 r2 (doc.multi, A-07) : un second document de la coquille ouvert à côté du premier, chacun
+  // dans son onglet et avec son état, puis fermé. Part du premier document enregistré et devant
+  // (fin de savedAck) et l'y laisse. Les accusés (un seul par demande), evora:active et evora:closed
+  // sont aussi jugés par verify().
+  async multi() {
+    const genuine = (pred) => (m) => pred(m) && !this.injectedIds.includes(m.id);
+    const activeOf = (ref) => genuine((m) => m.type === 'evora:active' && !!m.payload && m.payload.docRef === ref);
+    const dirtyOf = (ref, dirty) => genuine((m) => m.type === 'evora:dirty' && !!m.payload && m.payload.docRef === ref && m.payload.dirty === dirty);
+    const view = (r) => JSON.stringify(r && { documents: r.documents, active: r.active, open: r.open });
+    const activate = async (ref, want) => {
+      const id = await this.send('evora:activate', `{ docRef: ${JSON.stringify(ref)} }`);
+      this.ids.activates.push({ id, ref, want });
+      const ack = await this.waitEngine(genuine(this.response('evora:ack', id)), 15000);
+      return { id, ack: ack ? ack.msg.payload : null };
+    };
+    this.ids.activates = [];
+    const first = this.engineMessages().find((e) => e.plain && e.msg.type === 'evora:active' && !this.injectedIds.includes(e.msg.id));
+    if (!first || (first.msg.payload || {}).docRef !== DOC_REF) this.fail('multi-active', `premier evora:active : ${JSON.stringify(first && first.msg)}, attendu celui de ${DOC_REF} (ouvert le premier)`);
+    const before = await this.stats();
+    // Ouverture du second document : un onglet de plus, devant.
+    this.ids.multiOpen = await this.send('evora:open', `{ docRef: ${JSON.stringify(MULTI_REF)}, name: 'evora-multi.png', bytes: __ehp.png() }`);
+    const opened = this.logIndex(this.ids.multiOpen);
+    const openAck = await this.waitEngine(genuine(this.response('evora:ack', this.ids.multiOpen)), 30000, opened);
+    await this.sabotage('multi-open', 'refus fabriqué de l\'ouverture du second document',
+      `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(this.ids.multiOpen)}, payload: { ok: false, code: 'busy' } }`);
+    if (!openAck || !openAck.msg.payload || openAck.msg.payload.ok !== true) {
+      this.fail('multi-open', `accusé de evora:open du second document absent ou négatif : ${JSON.stringify(openAck && openAck.msg)}`);
+      return;
+    }
+    if (!(await this.until(() => this.dirtyAfter(this.ids.multiOpen, false, MULTI_REF), 10000))) this.fail('multi-open', 'evora:dirty {dirty: false} du second document absent après son ouverture');
+    if (!(await this.waitEngine(activeOf(MULTI_REF), 10000, opened))) this.fail('multi-active', 'evora:active du second document absent après son ouverture');
+    await this.sabotage('multi-active', 'evora:active à champ en trop', `{ v: 1, type: 'evora:active', payload: { docRef: ${JSON.stringify(MULTI_REF)}, dirty: false } }`);
+    const two = await this.stats();
+    const refs = two ? two.open.map((d) => d.docRef) : [];
+    if (!before || !two || two.documents !== before.documents + 1 || !refs.includes(DOC_REF) || !refs.includes(MULTI_REF) || two.active !== MULTI_REF) {
+      this.fail('multi-open', `après l'ouverture du second document, diag.stats : ${view(two)} (avant : ${view(before)})`);
+    }
+    // Ctrl+I modifie le seul document devant : aucun evora:dirty du premier (fenêtre jugée par verify).
+    const editFrom = this.ids.lastCommand;
+    if (!(await this.press('i', dirtyOf(MULTI_REF, true), 'evora:dirty true (second document)'))) {
+      this.fail('multi-dirty', 'evora:dirty {dirty: true} du second document absent après Ctrl+I');
+    }
+    await this.sabotage('multi-dirty', 'evora:dirty du premier document pendant la modification du second',
+      `{ v: 1, type: 'evora:dirty', payload: { dirty: true, docRef: ${JSON.stringify(DOC_REF)} } }`);
+    await sleep(1000);
+    const edited = await this.stats();
+    const firstDoc = edited && edited.open.find((d) => d.docRef === DOC_REF);
+    if (!firstDoc || firstDoc.dirty !== false) this.fail('multi-dirty', `premier document touché par la modification du second : ${view(edited)}`);
+    // evora:activate : le premier devant, Ctrl+I le modifie ; un docRef jamais ouvert : not_found.
+    const front = await activate(DOC_REF, 'ok');
+    this.windows.push({ kind: 'dirty-any', tag: 'multi-dirty', what: 'pendant la modification du second document', from: editFrom, to: front.id, docRef: DOC_REF });
+    await this.sabotage('multi-activate', 'refus fabriqué de evora:activate',
+      `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(front.id)}, payload: { ok: false, code: 'not_found' } }`);
+    if (!front.ack || front.ack.ok !== true) this.fail('multi-activate', `accusé de evora:activate du premier document : ${JSON.stringify(front.ack)}`);
+    if (!(await this.waitEngine(activeOf(DOC_REF), 10000, this.logIndex(front.id)))) this.fail('multi-active', 'evora:active du premier document absent après evora:activate');
+    if (!(await this.press('i', dirtyOf(DOC_REF, true), 'evora:dirty true (premier document)'))) {
+      this.fail('multi-activate', 'Ctrl+I après evora:activate n\'a pas modifié le premier document');
+    }
+    const unknown = await activate(CANCEL_REF, 'not_found');
+    if (!unknown.ack || unknown.ack.ok !== false || unknown.ack.code !== 'not_found') this.fail('multi-activate', `evora:activate d'un docRef jamais ouvert : ${JSON.stringify(unknown.ack)}`);
+    // evora:request-save sans docRef : un evora:save par document modifié, un seul en réponse.
+    const savesBefore = new Set(this.engineMessages().filter((e) => e.msg.type === 'evora:save').map((e) => e.msg.id));
+    this.ids.saveAll = await this.send('evora:request-save', `{ reason: 'autosave' }`);
+    let saves = [];
+    await this.until(() => {
+      saves = this.engineMessages().filter((e) => e.plain && e.msg.type === 'evora:save' && !savesBefore.has(e.msg.id) && !this.injectedIds.includes(e.msg.id)).map((e) => e.msg);
+      return saves.length >= 2;
+    }, 15000);
+    await sleep(1000);
+    await this.refresh();
+    saves = this.engineMessages().filter((e) => e.plain && e.msg.type === 'evora:save' && !savesBefore.has(e.msg.id) && !this.injectedIds.includes(e.msg.id)).map((e) => e.msg);
+    await this.sabotage('multi-save-all', 'second evora:save fabriqué en réponse à la même demande',
+      `{ v: 1, type: 'evora:save', re: ${JSON.stringify(this.ids.saveAll)}, payload: { docRef: ${JSON.stringify(MULTI_REF)}, name: 'evora-multi.pcraft', saveAs: false, bytes: new ArrayBuffer(8) } }`);
+    const saveOf = (ref) => saves.find((m) => m.payload && m.payload.docRef === ref);
+    const s1 = saveOf(DOC_REF);
+    const s2 = saveOf(MULTI_REF);
+    const named = (m, name) => !!m && m.payload.name === name && m.payload.saveAs === false && (m.payload.bytes || {}).head === '504b0304';
+    const answering = saves.filter((m) => m.re === this.ids.saveAll);
+    if (saves.length !== 2 || !named(s1, 'evora-smoke.pcraft') || !named(s2, 'evora-multi.pcraft') || answering.length !== 1 || saves.some((m) => m.re !== undefined && m.re !== this.ids.saveAll)) {
+      this.fail('multi-save-all', `evora:request-save sans docRef : ${saves.length} evora:save (${saves.map((m) => `${m.id} ${(m.payload || {}).docRef} ${(m.payload || {}).name} re ${m.re || 'aucun'}`).join(' | ') || 'aucun'}), attendu un par document modifié, un seul en réponse`);
+    }
+    // Accusés indépendants : le premier enregistré, le second en conflit, puis enregistré à son tour.
+    if (s1) {
+      const ok = await this.saved(s1.id, { ok: true, version: this.nextVersion() });
+      if (!(await this.until(() => this.dirtyAfter(ok, false, DOC_REF), 10000))) this.fail('multi-conflict', 'evora:dirty {dirty: false} du premier document absent après son accusé positif');
+    }
+    if (s2) {
+      const refused = await this.saved(s2.id, { ok: false, error: 'conflict' });
+      await this.sabotage('multi-conflict', 'evora:dirty false du second document après son refus (conflit)',
+        `{ v: 1, type: 'evora:dirty', payload: { dirty: false, docRef: ${JSON.stringify(MULTI_REF)} } }`);
+      await sleep(1500);
+      const st = await this.stats();
+      const d1 = st && st.open.find((d) => d.docRef === DOC_REF);
+      const d2 = st && st.open.find((d) => d.docRef === MULTI_REF);
+      if (!d1 || d1.dirty !== false || !d2 || d2.dirty !== true) this.fail('multi-conflict', `après l'accusé positif du premier et le conflit du second, diag.stats : ${view(st)}`);
+      const again = await this.send('evora:request-save', `{ reason: 'user', docRef: ${JSON.stringify(MULTI_REF)} }`);
+      this.windows.push({ tag: 'multi-conflict', what: 'après le conflit du second document', from: refused, to: again, docRef: MULTI_REF });
+      const resave = await this.waitEngine(genuine((m) => m.re === again), 15000);
+      if (!resave || resave.msg.type !== 'evora:save' || (resave.msg.payload || {}).docRef !== MULTI_REF) {
+        this.fail('multi-conflict', `demande d'enregistrement du second document après son conflit : ${JSON.stringify(resave && resave.msg)}`);
+      } else {
+        const ok = await this.saved(resave.msg.id, { ok: true, version: 1 });
+        if (!(await this.until(() => this.dirtyAfter(ok, false, MULTI_REF), 10000))) this.fail('multi-conflict', 'evora:dirty {dirty: false} du second document absent après son accusé positif');
+      }
+    }
+    // Ctrl+Tab : l'onglet suivant, le second, vient devant (geste de l'utilisateur).
+    if (!(await this.pressExpr(keyPress('Tab', 'Tab', { ctrl: true }), 'Ctrl+Tab', activeOf(MULTI_REF), 'evora:active (Ctrl+Tab)'))) {
+      this.fail('multi-active', 'evora:active du second document absent après Ctrl+Tab (onglet suivant)');
+    }
+    // Fermeture du second (Ctrl+W, Fichier › Fermer), devant et enregistré : jamais le premier.
+    const close = await activate(MULTI_REF, 'ok');
+    const ready = await this.stats();
+    if (!close.ack || close.ack.ok !== true || !ready || ready.active !== MULTI_REF) {
+      this.fail('multi-activate', `evora:activate du second document avant sa fermeture : ${JSON.stringify(close.ack)}, diag.stats ${view(ready)}`);
+      return;
+    }
+    this.ids.multiClosed = MULTI_REF;
+    const closeFrom = (await this.refresh()).log.length;
+    const ctrlW = keyPress('w', 'KeyW', { ctrl: true });
+    await this.evaluate(this.frame(), ctrlW, true);
+    let closed = await this.waitEngine(genuine((m) => m.type === 'evora:closed' && !!m.payload && m.payload.docRef === MULTI_REF), 10000, closeFrom);
+    if (!closed) {
+      // Une touche perdue seulement : le second encore ouvert et devant.
+      const still = await this.stats();
+      this.log(`[ehp] Ctrl+W : evora:closed non observé, diag.stats ${view(still)}`);
+      if (still && still.active === MULTI_REF && still.open.some((d) => d.docRef === MULTI_REF)) {
+        await this.evaluate(this.frame(), ctrlW, true);
+        closed = await this.waitEngine(genuine((m) => m.type === 'evora:closed' && !!m.payload && m.payload.docRef === MULTI_REF), 10000, closeFrom);
+      }
+    }
+    await this.sabotage('multi-closed', 'evora:closed fabriqué du premier document, resté ouvert',
+      `{ v: 1, type: 'evora:closed', payload: { docRef: ${JSON.stringify(DOC_REF)} } }`);
+    if (!closed) this.fail('multi-closed', 'evora:closed du second document absent après Ctrl+W (Fichier › Fermer)');
+    if (!(await this.waitEngine(activeOf(DOC_REF), 10000, closeFrom))) this.fail('multi-active', 'evora:active du premier document absent après la fermeture du second');
+    const after = await this.stats();
+    if (!after || !before || after.documents !== before.documents || after.open.some((d) => d.docRef === MULTI_REF) || !after.open.some((d) => d.docRef === DOC_REF && d.dirty === false)
+      || after.active !== DOC_REF) {
+      this.fail('multi-closed', `après la fermeture du second document, diag.stats : ${view(after)} (avant son ouverture : ${view(before)})`);
+    }
+    const rq = await this.send('evora:request-save', `{ reason: 'user', docRef: ${JSON.stringify(MULTI_REF)} }`);
+    const gone = await this.waitEngine(genuine((m) => m.re === rq), 15000);
+    if (!gone || gone.msg.type !== 'evora:ack' || gone.msg.payload.code !== 'not_found') this.fail('multi-closed', `demande d'enregistrement du document fermé : ${JSON.stringify(gone && gone.msg)}`);
+    const late = await activate(MULTI_REF, 'not_found');
+    if (!late.ack || late.ack.ok !== false || late.ack.code !== 'not_found') this.fail('multi-closed', `evora:activate du document fermé : ${JSON.stringify(late.ack)}`);
   }
 
   // LUM-03 : export.drive, Enregistrer sous et premier enregistrement d'un document du moteur, sans
@@ -2379,6 +2550,13 @@ export class EhpBench {
           // LUM-13 : sans réponse, charge utile vide (A-19).
           if (m.re !== undefined || !only([]) || Object.keys(p || {}).length) this.fail('focus-out', `evora:focus-out non conforme : ${where}`);
           break;
+        case 'evora:active':
+        case 'evora:closed':
+          // LUM-02 r2 (doc.multi, A-07) : sans réponse, un docRef seul, obligatoire.
+          if (m.re !== undefined || !only(['docRef']) || !ULID_RE.test((p && p.docRef) || '')) {
+            this.fail(m.type === 'evora:active' ? 'multi-active' : 'multi-closed', `${m.type} non conforme : ${where}`);
+          }
+          break;
         case 'evora:failed':
           if (this.panicMode) {
             if (m.re !== undefined || !only(['code']) || p.code !== 'panic') this.fail('panique', `evora:failed non conforme à la panique : ${where}`);
@@ -2417,12 +2595,60 @@ export class EhpBench {
       const to = w.to ? this.logIndex(w.to) : -1;
       // Fenêtres de LUM-03 : aucun evora:export après un refus ('export') ; plus aucun message pour
       // l'ancien docRef après une adoption ('ref', jusqu'à la fin du journal).
+      // LUM-02 r2 ('dirty-any') : aucun evora:dirty de l'autre document pendant une modification.
       const bad = {
         export: (e) => e.msg.type === 'evora:export',
         ref: (e) => !!e.msg.payload && e.msg.payload.docRef === w.docRef,
+        'dirty-any': (e) => e.msg.type === 'evora:dirty' && !!e.msg.payload && e.msg.payload.docRef === w.docRef,
       }[w.kind] || ((e) => e.msg.type === 'evora:dirty' && e.msg.payload && e.msg.payload.dirty === false && e.msg.payload.docRef === w.docRef);
+      const what = { export: 'evora:export', ref: `message pour ${w.docRef}`, 'dirty-any': `evora:dirty de ${w.docRef}` }[w.kind] || 'evora:dirty {dirty: false}';
       const wrong = this.state.log.slice(from + 1, to < 0 ? undefined : to).filter((e) => e.fromEngine && e.plain && e.msg && bad(e));
-      if (wrong.length) this.fail(w.tag, `${w.what} : ${w.kind === 'export' ? 'evora:export' : w.kind === 'ref' ? `message pour ${w.docRef}` : 'evora:dirty {dirty: false}'} reçu (${wrong.map((e) => e.msg.id).join(', ')})`);
+      if (wrong.length) this.fail(w.tag, `${w.what} : ${what} reçu (${wrong.map((e) => e.msg.id).join(', ')})`);
+    }
+    // LUM-02 r2 (doc.multi) : evora:active ne nomme qu'un document que la coquille a ouvert ou fait
+    // adopter, et seulement quand il change (une fermeture du document signalé remet à zéro) ; un
+    // seul evora:closed, celui du document que le banc ferme. Les messages fabriqués par le témoin
+    // « banc » sont jugés sans entrer dans la suite.
+    let front = null;
+    for (const e of msgs.filter((x) => x.plain && x.msg && ['evora:active', 'evora:closed'].includes(x.msg.type))) {
+      const ref = (e.msg.payload || {}).docRef;
+      if (e.msg.type === 'evora:closed') {
+        const same = msgs.filter((x) => x.plain && x.msg && x.msg.type === 'evora:closed' && (x.msg.payload || {}).docRef === ref);
+        if (ref !== this.ids.multiClosed || same.length !== 1) {
+          this.fail('multi-closed', `evora:closed id ${e.msg.id} inattendu : ${ref}, reçu ${same.length} fois (seul ${this.ids.multiClosed || 'aucun document'} est fermé par le banc)`);
+        }
+        if (!this.injectedIds.includes(e.msg.id) && ref === front) front = null;
+        continue;
+      }
+      if (this.injectedIds.includes(e.msg.id)) continue;
+      if (!HOST_REFS.includes(ref)) this.fail('multi-active', `evora:active id ${e.msg.id} d'un document que la coquille n'a pas ouvert : ${ref}`);
+      else if (ref === front) this.fail('multi-active', `evora:active id ${e.msg.id} répété sans changement : ${ref}`);
+      front = ref;
+    }
+    // LUM-02 r2 : un seul accusé, conforme, par ouverture du second document et par evora:activate ;
+    // un seul evora:save en réponse à evora:request-save sans docRef.
+    if (this.ids.multiOpen) {
+      const rs = answered(this.ids.multiOpen);
+      const bad = rs.filter((e) => e.msg.type !== 'evora:ack' || !e.msg.payload || e.msg.payload.ok !== true);
+      if (rs.length !== 1 || bad.length) {
+        this.fail('multi-open', `evora:open du second document (id ${this.ids.multiOpen}) : ${rs.length} réponse(s) [${rs.map((e) => e.msg.id).join(', ')}], `
+          + `non conformes : ${bad.map((e) => `${e.msg.id} ${JSON.stringify(e.msg.payload)}`).join(' | ') || 'aucune'}`);
+      }
+    }
+    for (const a of this.ids.activates || []) {
+      const rs = answered(a.id);
+      const want = (q) => (a.want === 'ok' ? q.ok === true && q.code === undefined : q.ok === false && q.code === a.want);
+      const bad = rs.filter((e) => e.msg.type !== 'evora:ack' || !want(e.msg.payload || {}));
+      if (rs.length !== 1 || bad.length) {
+        this.fail(a.ref === MULTI_REF && a.want !== 'ok' ? 'multi-closed' : 'multi-activate', `evora:activate de ${a.ref} (id ${a.id}, attendu ${a.want}) : ${rs.length} réponse(s) `
+          + `[${rs.map((e) => e.msg.id).join(', ')}], non conformes : ${bad.map((e) => `${e.msg.id} ${JSON.stringify(e.msg.payload)}`).join(' | ') || 'aucune'}`);
+      }
+    }
+    if (this.ids.saveAll) {
+      const rs = answered(this.ids.saveAll);
+      if (rs.length !== 1 || rs[0].msg.type !== 'evora:save') {
+        this.fail('multi-save-all', `evora:request-save sans docRef (id ${this.ids.saveAll}) : ${rs.length} réponse(s) [${rs.map((e) => `${e.msg.id} ${e.msg.type}`).join(', ')}], attendu un seul evora:save`);
+      }
     }
     // LUM-12 : un seul accusé par evora:open {new: true}, positif après Entrée, cancelled après Échap.
     for (const [tag, want] of [['open-new', (p) => p.ok === true && p.code === undefined], ['open-new-cancel', (p) => p.ok === false && p.code === 'cancelled']]) {

@@ -1143,7 +1143,10 @@ function initPayload(capabilities) {
   const prefs = POLICY ? { 'evora.locationPolicy': POLICY } : BENCH_PREFS;
   return { lang: 'fr', engineLang: 'fr', theme: 'light', accent: INIT_ACCENT, readOnly: false, storageNs: STORAGE_NS,
     capabilities, prefs, limits: { maxDocumentBytes: BENCH_MAX_BYTES, maxExportBytes: BENCH_MAX_BYTES, maxPrefsBytes: BENCH_PREFS_MAX },
-    prefsSnapshot: JSON.stringify({ [PREFS_MARKER_KEY]: PREFS_MARKER }) };
+    // LUM-15 r2 : l'instantané du compte remplace les préférences du navigateur ; il porte donc le
+    // choix du compte que SEED_JS pose aussi dans le stockage (Exporter sous, Métadonnées « toutes »,
+    // LUM-14), et une clé que le moteur ne connaît pas. export-no-gps prouve qu'il est lu.
+    prefsSnapshot: JSON.stringify({ dialogs: { 'file.export.exportAs': { metadata: 'all' } }, [PREFS_MARKER_KEY]: PREFS_MARKER }) };
 }
 
 // LUM-06 r2 : une couleur #RRGGBB ou #RRGGBBAA du rapport de thème, en [r, g, b, a], ou null.

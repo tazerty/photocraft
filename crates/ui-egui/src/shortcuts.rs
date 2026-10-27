@@ -44,10 +44,43 @@ pub fn parse(s: &str) -> Option<KeyboardShortcut> {
     Some(KeyboardShortcut::new(mods, key))
 }
 
+/// Evora build (patch LUM-TOUCHES): the shortcuts browsers keep for themselves (new window, close
+/// or open a tab, next tab…) and the keys the host build types instead, as (reserved,
+/// replacement), set once by the web shell under the Evora host bridge (`apps/photocraft-web`,
+/// `host_keys`), which turns a press of the replacement into the reserved key. [`pretty`] shows
+/// the replacement wherever the reserved key would be shown (menus, palette, tooltips, the
+/// Keyboard Shortcuts dialog). Empty in every other build.
+static HOST_KEY_ALIASES: std::sync::Mutex<Vec<(KeyboardShortcut, String)>> = std::sync::Mutex::new(Vec::new());
+
+/// Evora build (patch LUM-TOUCHES): set the aliases (see `HOST_KEY_ALIASES`); a pair whose
+/// either side doesn't parse is left out.
+pub fn set_host_key_aliases(pairs: &[(&str, &str)]) {
+    let mut aliases = HOST_KEY_ALIASES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    *aliases = pairs.iter().filter(|(_, r)| parse(r).is_some()).filter_map(|(k, r)| Some((parse(k)?, (*r).to_string()))).collect();
+}
+
+/// Evora build (patch LUM-TOUCHES): the replacement the host build types for the shortcut `s`.
+pub fn host_key_alias(s: &str) -> Option<String> {
+    let aliases = HOST_KEY_ALIASES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if aliases.is_empty() {
+        return None;
+    }
+    let sc = parse(s)?;
+    aliases.iter().find(|(reserved, _)| *reserved == sc).map(|(_, replacement)| replacement.clone())
+}
+
 /// Human-readable form for menus, tooltips and inline hints (`Cmd+Shift+N` → `⌘⇧N` on
 /// macOS, `Ctrl+Shift+N` elsewhere). Works for lone keys too: `pretty("Alt")` is `⌥`/`Alt`,
-/// `pretty("Enter")` is `↩`/`Enter`.
+/// `pretty("Enter")` is `↩`/`Enter`. Evora build (patch LUM-TOUCHES): a shortcut browsers keep
+/// shows the key the host build types instead.
 pub fn pretty(s: &str) -> String {
+    match host_key_alias(s) {
+        Some(replacement) => pretty_keys(&replacement),
+        None => pretty_keys(s),
+    }
+}
+
+fn pretty_keys(s: &str) -> String {
     let mac = cfg!(target_os = "macos");
     let mut parts: Vec<&str> = s.split('+').collect();
     if s.ends_with('+') {

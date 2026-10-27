@@ -530,6 +530,8 @@ impl HostDocs {
                 stats["prefs"] = self.prefs.report(app, ctx);
                 // Patch LUM-02 r2: the host document in front (null: none of the host's).
                 stats["active"] = json!(self.front(app));
+                // Patch LUM-TOUCHES: the keys typed instead of those the browser keeps.
+                stats["keys"] = crate::host_keys::report(app);
                 self.bridge.ack_result(id, &stats);
             }
             "diag.menus" => self.bridge.ack_result(id, &crate::host_commands::menus(app)),

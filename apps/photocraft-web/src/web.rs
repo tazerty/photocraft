@@ -178,10 +178,12 @@ pub fn start() {
                     }
                     // Evora build (patch E4): the host's requests reach the app between frames.
                     // Patch LUM-09: the menu items the host build hides; patch LUM-13: the exit
-                    // key (F6), with `ui.focus-out` effective.
+                    // key (F6), with `ui.focus-out` effective; patch LUM-TOUCHES: the keys typed
+                    // instead of those the browser keeps.
                     let host = shell_bridge.map(|bridge| {
                         bridge.attach(cc.egui_ctx.clone());
                         crate::host_menus::install();
+                        crate::host_keys::install();
                         crate::host_focus::listen(&bridge);
                         crate::host_docs::HostDocs::new(bridge, renderer, host_prefs)
                     });
@@ -481,6 +483,11 @@ impl eframe::App for WebShell {
         // A tap reaches eframe as Pointer Events and Touch Events: keep one press per tap, or the
         // twin press closes the menu the first one opened (#2095).
         photocraft_ui_egui::touch_twins::drop_twins(ctx, raw_input);
+        // Evora build (patch LUM-TOUCHES): under the bridge, the keys typed instead of those the
+        // browser keeps become those keys.
+        if self.host.is_some() {
+            crate::host_keys::rewrite(&self.app, ctx, raw_input);
+        }
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {

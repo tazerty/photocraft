@@ -46,10 +46,11 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
   # Tag amont épinglé (D-19) et son commit.
-  UPSTREAM_TAG: v0.15.1
-  UPSTREAM_COMMIT: 60c87b9884fdae0e464614d482a3bc435cbbc578
+  UPSTREAM_TAG: v0.16.0
+  UPSTREAM_COMMIT: b1794c6e0608ccfc887213dcf58398977c5cb75e
   # Pas de rust-toolchain(.toml) au tag : stable exacte, >= rust-version 1.95 du workspace ; celle
-  # de la release web de l'amont v0.15.1 (run 40024939298, job Web (wasm) 120658837294).
+  # de la release web de l'amont v0.16.0 (run 40199049357, job Web (wasm) 121186201070), inchangée
+  # depuis v0.15.1 (run 40024939298), comme Trunk, wasm-bindgen et wasm-opt.
   RUST_TOOLCHAIN: 1.99.1
   # Trunk 0.21.14 (même version que la CI amont), binaire officiel trunk-rs.
   TRUNK_VERSION: 0.21.14
@@ -92,7 +93,7 @@ jobs:
         with:
           persist-credentials: false
           # Assez profond pour atteindre le commit du tag sous la série Evora (38 commits à la montée
-          # vers v0.15.1) et les lots qui la suivent.
+          # vers v0.15.1, 61 à la montée vers v0.16.0) et les lots qui la suivent.
           fetch-depth: 100
 
       - name: Vérifier la base amont

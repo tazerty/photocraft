@@ -423,10 +423,20 @@ jobs:
           # E4 et E5 : pont hôte EHP v1 (?host=evora), coquille minimale et evora-host.json écrit par
           # le banc ; espace de noms et purge par le pont (evora/ci/smoke_ehp.mjs). Les attentes du
           # scénario hors pont ne s'appliquent pas ici.
+          # EVO-CMD (montée v0.16.0) : le premier catalogue de commandes reçu par ce passage devient
+          # commands.json de l'artefact (empreinte dans SHA256SUMS), que le provisionnement d'Evora copie.
           SMOKE_SCENARIO=pont-ehp SMOKE_QUERY="host=evora&webgl" SMOKE_EXPECT_LANG= SMOKE_EXPECT_THEME= \
             SMOKE_BROWSER_LANG= SMOKE_EXPECT_FONTS= SMOKE_URL_STORAGE_NS= SMOKE_OLD_PURGE= \
+            SMOKE_COMMANDS_OUT="$EVORA_OUT_DIR/commands.json" \
             node evora/ci/smoke.mjs "$EVORA_PKG_DIR" "$EVORA_PKG_DIR/csp-hashes.txt" "$RUNNER_TEMP/evora-smoke-ehp.json" "$EVORA_FONTS_DIR"
           pont=$?
+          if [ -s "$EVORA_OUT_DIR/commands.json" ]; then
+            (cd "$EVORA_OUT_DIR" && sha256sum commands.json >> SHA256SUMS)
+            echo "commands.json : $(python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["count"], "commandes, empreinte", d["hash"])' "$EVORA_OUT_DIR/commands.json")"
+          else
+            echo "::error::commands.json absent : aucun catalogue de commandes reçu par le banc pont-ehp"
+            pont=1
+          fi
           # E4 : pont muet. ?host=evora avec l'evora-host.json livré (vide) : aucun message à la page
           # parente, aucun démarrage, aucun stockage, et l'avertissement attendu.
           SMOKE_SCENARIO=pont-muet SMOKE_TIMEOUT_MS=15000 SMOKE_QUERY="host=evora&webgl" SMOKE_EXPECT_LANG= SMOKE_EXPECT_THEME= \
@@ -568,5 +578,6 @@ jobs:
             ${{ env.EVORA_OUT_DIR }}/${{ env.EVORA_FONTS_ARTIFACT }}.zip
             ${{ env.EVORA_OUT_DIR }}/SHA256SUMS
             ${{ env.EVORA_OUT_DIR }}/csp-hashes.txt
+            ${{ env.EVORA_OUT_DIR }}/commands.json
           if-no-files-found: error
           compression-level: 0

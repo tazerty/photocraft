@@ -130,6 +130,18 @@
 // bloc SoLd (taille et résolution, que l'exporteur mesure sur le fichier qu'il incorpore) : chacune
 // sort debout (politique-debout), à sa résolution (politique-resolution).
 //
+// Montée v0.16.0 (lot LUM-FK de la campagne « suite V1 ») : la coquille offre aussi prefs.sync et
+// command.catalog. EVO-CMD : le moteur émet son catalogue de commandes (evora:commands) au démarrage
+// en français puis en allemand après evora:lang, de même empreinte, sans commande masquée, avec ses
+// commandes destructives marquées (commands-catalog) ; une commande du catalogue hors liste compilée
+// ouvre son dialogue (command-catalog-run) ; une commande destructive est refusée sans confirmed
+// (forbidden), admise avec (command-destructive). LUM-TOUCHES : diag.stats rend la table des touches
+// remplaçantes, celle que montrent les menus (keys-alias), et Ctrl+Alt+N ouvre Fichier › Nouveau
+// (keys-press). LUM-PSD et LUM-EXPORTS : Exporter sous propose PNG, JPG, WebP, TIFF et PSD
+// (export-formats). LUM-15 r2 : l'instantané de evora:init remplace les préférences du navigateur,
+// et chaque enregistrement des préférences part en evora:prefs, avec la clé inconnue de
+// l'instantané gardée (prefs-sync). Avec SMOKE_COMMANDS_OUT, le premier catalogue reçu est écrit
+// dans ce fichier (commands.json de l'artefact).
 // Témoins sabordés (SMOKE_SABOTAGE) : le même banc, sur un défaut fabriqué ; un témoin est VALIDE
 // (code 0) seulement si chaque défaut rougit à SON détecteur, à SA place, et si tout le reste du banc
 // reste vert (verdict exact, function witness) :
@@ -260,10 +272,10 @@ const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 // Vocabulaire du §4.2 et ui.focus-out de l'amendement A-19 (1.1 en projet, §7.9).
 const CAPABILITY_NAMES = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 'doc.multi', 'doc.request-save',
   'export.drive', 'media.need', 'media.ranges', 'pick.drive', 'command', 'storage.ns', 'storage.memory',
-  'storage.purge', 'live.lang', 'live.theme', 'font.inject', 'author', 'ui.focus-out'];
+  'storage.purge', 'live.lang', 'live.theme', 'font.inject', 'author', 'ui.focus-out', 'prefs.sync', 'command.catalog'];
 // Capacités que ce scénario exerce : le moteur ne doit en annoncer aucune autre.
 const EXERCISED = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 'doc.multi', 'doc.request-save', 'export.drive', 'pick.drive',
-  'storage.ns', 'storage.purge', 'live.lang', 'live.theme', 'command', 'font.inject', 'ui.focus-out'];
+  'storage.ns', 'storage.purge', 'live.lang', 'live.theme', 'command', 'font.inject', 'ui.focus-out', 'prefs.sync', 'command.catalog'];
 // LUM-09 : articles que le build hôte doit masquer (échantillon : impression, lots, script qui lit
 // le disque, montage vidéo, Quitter, et depuis v0.16.0 Aide › Rechercher les mises à jour), tous
 // présents dans l'arbre complet des menus.
@@ -274,7 +286,30 @@ const ACCEPT_RE = /^(\.[a-z0-9]+|[a-z0-9.+-]+\/[a-z0-9.+*-]+)$/;
 // LUM-10 : commandes de la liste blanche du moteur qui ouvrent un dialogue, et commandes réelles du
 // moteur hors liste (sans dialogue ni effet sur le document).
 const DIALOG_COMMANDS = ['file.new', 'file.export.exportAs', 'edit.keyboardShortcuts'];
-const REFUSED_COMMANDS = ['view.zoomIn', 'file.exit'];
+// Montée v0.16.0 : avec command.catalog, toute commande du catalogue s'exécute ; hors catalogue :
+// une commande masquée (Quitter) et un identifiant inconnu.
+const REFUSED_COMMANDS = ['file.exit', 'evora.inconnue'];
+// EVO-CMD : une commande du catalogue hors liste compilée qui ouvre un dialogue, et une commande
+// destructive sans effet sur le document du banc.
+const CATALOG_DIALOG = 'image.imageSize';
+const DESTRUCTIVE_COMMAND = 'edit.purge.clipboard';
+// LUM-TOUCHES : touche réservée par les navigateurs, remplaçante, commande que la touche lance.
+const KEY_ALIASES = [
+  ['Cmd+N', 'Cmd+Alt+N', 'file.new'],
+  ['Cmd+W', 'Alt+Shift+W', 'file.close'],
+  ['Cmd+T', 'Alt+Shift+F', 'edit.freeTransform'],
+  ['Cmd+Shift+T', 'Alt+Shift+R', 'edit.transform.again'],
+  ['Cmd+Shift+N', 'Alt+Shift+N', 'layer.new.layer'],
+  ['Ctrl+Tab', 'Alt+Shift+Right', 'window.nextDocument'],
+  ['Ctrl+Shift+Tab', 'Alt+Shift+Left', 'window.previousDocument'],
+];
+// LUM-PSD et LUM-EXPORTS : ce que propose Exporter sous sous le pont.
+const EXPORT_FORMATS = ['png', 'jpg', 'webp', 'tif', 'psd'];
+// LUM-15 r2 : instantané des préférences du compte (un objet JSON dont le moteur ignore la clé : il
+// doit la garder en enregistrant) et plafond de banc (pas un plafond du produit, D-15).
+const PREFS_MARKER_KEY = 'evoraSmokePrefs';
+const PREFS_MARKER = 'instantane-de-evora-init';
+const BENCH_PREFS_MAX = 1024 * 1024;
 const ACK_CODES = ['clean', 'cancelled', 'conflict', 'too_large', 'quota', 'forbidden', 'not_found', 'invalid_content',
   'unsupported', 'rate_limited', 'read_only', 'busy', 'capability', 'network', 'server', 'timeout'];
 const FAIL_CODES = ['no_webgl2', 'wasm', 'memory', 'panic', 'unsupported_browser', 'protocol', 'init'];
@@ -1107,7 +1142,8 @@ function initPayload(capabilities) {
   // LUM-14 r2 : le scénario pont-politique n'impose que la politique de localisation.
   const prefs = POLICY ? { 'evora.locationPolicy': POLICY } : BENCH_PREFS;
   return { lang: 'fr', engineLang: 'fr', theme: 'light', accent: INIT_ACCENT, readOnly: false, storageNs: STORAGE_NS,
-    capabilities, prefs, limits: { maxDocumentBytes: BENCH_MAX_BYTES, maxExportBytes: BENCH_MAX_BYTES } };
+    capabilities, prefs, limits: { maxDocumentBytes: BENCH_MAX_BYTES, maxExportBytes: BENCH_MAX_BYTES, maxPrefsBytes: BENCH_PREFS_MAX },
+    prefsSnapshot: JSON.stringify({ [PREFS_MARKER_KEY]: PREFS_MARKER }) };
 }
 
 // LUM-06 r2 : une couleur #RRGGBB ou #RRGGBBAA du rapport de thème, en [r, g, b, a], ou null.
@@ -1455,6 +1491,7 @@ export class EhpBench {
     await this.exports();
     await this.openNew();
     await this.commands();
+    await this.suiteV1();
     await this.menusMasked();
     await this.fonts();
     await this.focusOut();
@@ -2299,6 +2336,65 @@ export class EhpBench {
     await this.sabotage('command-refused', 'accusé positif fabriqué d\'une commande hors liste', `{ v: 1, type: 'evora:ack', re: ${JSON.stringify(refused.id)}, payload: { ok: true } }`);
   }
 
+  // Montée v0.16.0 (EVO-CMD, LUM-TOUCHES, LUM-PSD, LUM-EXPORTS, LUM-15 r2), voir l'en-tête.
+  async suiteV1() {
+    const first = await this.stats();
+    if (!first) {
+      this.fail('command-catalog-run', 'diag.stats sans résultat exploitable : commandes du catalogue non vérifiables');
+      return;
+    }
+    const run = await this.catalogCommand(CATALOG_DIALOG, {});
+    if (!run || run.ok !== true || run.code !== undefined) this.fail('command-catalog-run', `evora:command ${CATALOG_DIALOG} : ${JSON.stringify(run)}`);
+    else if (!(await this.dialogsReach(first.dialogs + 1, () => this.stats(), 8000))) this.fail('command-catalog-run', `${CATALOG_DIALOG} accusé sans qu'un dialogue s'ouvre`);
+    else await this.closeDialogs(first.dialogs, 'command-catalog-run', CATALOG_DIALOG);
+    const refused = await this.catalogCommand(DESTRUCTIVE_COMMAND, {});
+    if (!refused || refused.ok !== false || refused.code !== 'forbidden') {
+      this.fail('command-destructive', `${DESTRUCTIVE_COMMAND} sans confirmed : ${JSON.stringify(refused)}, attendu { ok: false, code: "forbidden" }`);
+    }
+    const admitted = await this.catalogCommand(DESTRUCTIVE_COMMAND, { confirmed: true });
+    if (!admitted || (admitted.ok !== true && admitted.code !== 'busy')) {
+      this.fail('command-destructive', `${DESTRUCTIVE_COMMAND} avec confirmed : ${JSON.stringify(admitted)}, attendu un accusé positif (ou busy, commande désactivée)`);
+    }
+    const r = await this.stats();
+    const keys = r && Array.isArray(r.keys) ? r.keys : null;
+    const badKeys = keys ? KEY_ALIASES.filter(([reserved, replacement, command]) => {
+      const row = keys.find((k) => k && k.reserved === reserved);
+      return !row || row.replacement !== replacement || row.command !== command || typeof row.shown !== 'string' || row.shown !== row.expected
+        || row.shown === reserved.replace('Cmd', 'Ctrl');
+    }).map((k) => k[0]) : ['keys absent'];
+    if (badKeys.length || (keys && keys.length !== KEY_ALIASES.length)) this.fail('keys-alias', `diag.stats keys : ${badKeys.join(', ') || `${keys.length} ligne(s)`} ; reçu ${JSON.stringify(keys).slice(0, 400)}`);
+    const before = await this.stats();
+    await this.evaluate(this.frame(), keyDown('n', 'KeyN', { ctrl: true, alt: true }), true);
+    if (!before || !(await this.dialogsReach(before.dialogs + 1, () => this.stats(), 8000))) this.fail('keys-press', 'Ctrl+Alt+N (remplaçante de Ctrl+N) sans dialogue Nouveau');
+    else await this.closeDialogs(before.dialogs, 'keys-press', 'Ctrl+Alt+N');
+    const formats = r && Array.isArray(r.exportFormats) ? r.exportFormats : null;
+    if (JSON.stringify(formats) !== JSON.stringify(EXPORT_FORMATS)) this.fail('export-formats', `diag.stats exportFormats : ${JSON.stringify(formats)}, attendu ${JSON.stringify(EXPORT_FORMATS)}`);
+    const ps = r && r.prefsSync;
+    if (!ps || ps.effective !== true || ps.snapshot !== 'imposed' || !(ps.sent >= 1)) {
+      this.fail('prefs-sync', `diag.stats prefsSync : ${JSON.stringify(ps)}, attendu { effective: true, snapshot: "imposed", sent ≥ 1 }`);
+    }
+    this.ids.suiteV1 = true;
+  }
+
+  // Échap jusqu'à revenir à n dialogues (trois essais), sinon un rouge `tag`.
+  async closeDialogs(n, tag, what) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await this.evaluate(this.frame(), keyPress('Escape', 'Escape'), true);
+      if (await this.dialogsReach(n, () => this.stats(), 3000)) return true;
+    }
+    this.fail(tag, `le dialogue ouvert par ${what} ne s'est pas refermé sur Échap`);
+    return false;
+  }
+
+  // EVO-CMD : un evora:command hors du journal de commands() (jugé dans suiteV1) ; `extra` ajoute
+  // confirmed. Rend la charge utile de la réponse du moteur, ou null.
+  async catalogCommand(command, extra) {
+    const id = await this.send('evora:command', JSON.stringify({ command, params: {}, ...extra }));
+    (this.ids.catalogCommands ||= []).push({ id, command, extra });
+    const ack = await this.waitEngine((m) => m.type === 'evora:ack' && m.re === id && !this.injectedIds.includes(m.id), 15000);
+    return ack ? ack.msg.payload : null;
+  }
+
   // Un evora:command, journalisé pour verify() ; rend la charge utile de la réponse du moteur (jamais
   // celle d'un message fabriqué par le témoin « banc »).
   async command(command, refused = false) {
@@ -2561,6 +2657,15 @@ export class EhpBench {
           // LUM-13 : sans réponse, charge utile vide (A-19).
           if (m.re !== undefined || !only([]) || Object.keys(p || {}).length) this.fail('focus-out', `evora:focus-out non conforme : ${where}`);
           break;
+        case 'evora:commands': {
+          // EVO-CMD : sans réponse ; le contenu est jugé après la boucle (commands-catalog).
+          if (m.re !== undefined || !only(['lang', 'count', 'hash', 'params', 'commands'])) this.fail('commands-catalog', `evora:commands non conforme : ${where}`);
+          break;
+        }
+        case 'evora:prefs':
+          // LUM-15 r2 : sans réponse, le seul texte des préférences enregistrées.
+          if (m.re !== undefined || !only(['snapshot']) || typeof (p && p.snapshot) !== 'string') this.fail('prefs-sync', `evora:prefs non conforme : ${where}`);
+          break;
         case 'evora:active':
         case 'evora:closed':
           // LUM-02 r2 (doc.multi, A-07) : sans réponse, un docRef seul, obligatoire.
@@ -2769,12 +2874,63 @@ export class EhpBench {
       if (!this.ids.prefsStats) this.fail('prefs-init', 'relevé des préférences de evora:init non joué');
     }
     if (this.politiqueMode) this.politiqueVerdict(msgs);
+    if (this.ids.suiteV1) this.suiteV1Verdict();
     const announced = this.readyCaps;
     const extra = announced.filter((x) => !EXERCISED.includes(x));
     if (extra.length) this.fail('caps', `capacités annoncées non exercées par ce scénario : ${extra.join(', ')}`);
     const missing = EXERCISED.filter((x) => !announced.includes(x));
     if (missing.length) this.fail('caps', `capacités attendues absentes de evora:ready : ${missing.join(', ')}`);
     return this.problems;
+  }
+
+  // Montée v0.16.0 : les catalogues (EVO-CMD) et les préférences (LUM-15 r2) reçus du moteur.
+  suiteV1Verdict() {
+    const own = (type) => this.engineMessages().filter((e) => e.msg && e.msg.type === type && !this.injectedIds.includes(e.msg.id));
+    const cats = own('evora:commands').map((e) => ({ id: e.msg.id, p: e.msg.payload || {} }));
+    const why = [];
+    if (cats.length < 2) why.push(`${cats.length} catalogue(s), attendu au moins 2 (fr au démarrage, de après evora:lang)`);
+    for (const c of cats) {
+      const p = c.p;
+      const list = Array.isArray(p.commands) ? p.commands : null;
+      const ids = list ? list.map((x) => x && x.id) : [];
+      const shape = !!list && list.length > 0 && p.count === list.length && /^[0-9a-f]{16}$/.test(p.hash || '') && typeof p.lang === 'string'
+        && !!p.params && p.params.type === 'object' && p.params.maxProperties === 0 && new Set(ids).size === ids.length
+        && list.every((x) => x && typeof x.id === 'string' && typeof x.label === 'string' && x.label.length > 0 && Array.isArray(x.path)
+          && x.path.every((s) => typeof s === 'string') && typeof x.enabled === 'boolean' && typeof x.destructive === 'boolean');
+      if (!shape) { why.push(`catalogue ${c.id} mal formé`); continue; }
+      const hidden = MASKED_SAMPLE.filter((x) => ids.includes(x));
+      if (hidden.length) why.push(`catalogue ${c.id} : commandes masquées présentes (${hidden.join(', ')})`);
+      const absent = [...DIALOG_COMMANDS, CATALOG_DIALOG, ...KEY_ALIASES.map((k) => k[2])].filter((x) => !ids.includes(x));
+      if (absent.length) why.push(`catalogue ${c.id} sans ${absent.join(', ')}`);
+      const d = list.find((x) => x.id === DESTRUCTIVE_COMMAND);
+      if (!d || d.destructive !== true) why.push(`catalogue ${c.id} : ${DESTRUCTIVE_COMMAND} absent ou non destructive`);
+      const plain = list.find((x) => x.id === CATALOG_DIALOG);
+      if (plain && plain.destructive !== false) why.push(`catalogue ${c.id} : ${CATALOG_DIALOG} marquée destructive`);
+      if (p.hash !== cats[0].p.hash) why.push(`catalogue ${c.id} : empreinte ${p.hash}, ${cats[0].p.hash} au premier`);
+    }
+    const first = cats[0] && cats[0].p;
+    if (first && first.lang !== 'fr') why.push(`premier catalogue en ${first.lang}, attendu fr`);
+    const fileNew = first && Array.isArray(first.commands) ? first.commands.find((x) => x && x.id === 'file.new') : null;
+    if (fileNew && fileNew.label === 'New…') why.push('libellé de file.new non traduit dans le premier catalogue (fr)');
+    if (!cats.some((c) => c.p.lang === 'de')) why.push('aucun catalogue en de après evora:lang');
+    if (why.length) this.fail('commands-catalog', why.join(' ; ').slice(0, 700));
+    if (first && process.env.SMOKE_COMMANDS_OUT && !SABOTAGE) {
+      fs.writeFileSync(process.env.SMOKE_COMMANDS_OUT, `${JSON.stringify({ app: 'lumbra', version: this.readyVersion, ...first }, null, 1)}\n`);
+    }
+    const prefs = own('evora:prefs');
+    const pw = [];
+    if (!prefs.length) pw.push('aucun evora:prefs');
+    for (const e of prefs) {
+      const p = e.msg.payload || {};
+      let parsed = null;
+      try { parsed = JSON.parse(p.snapshot); } catch { parsed = null; }
+      if (typeof p.snapshot !== 'string' || p.snapshot.length > BENCH_PREFS_MAX || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        pw.push(`evora:prefs ${e.msg.id} mal formé`);
+      } else if (parsed[PREFS_MARKER_KEY] !== PREFS_MARKER) {
+        pw.push(`evora:prefs ${e.msg.id} sans la clé ${PREFS_MARKER_KEY} de l'instantané de evora:init`);
+      }
+    }
+    if (pw.length) this.fail('prefs-sync', pw.join(' ; ').slice(0, 500));
   }
 
   summary() {

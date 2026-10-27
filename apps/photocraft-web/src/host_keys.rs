@@ -46,15 +46,13 @@ fn pairs() -> Vec<(&'static str, &'static str)> {
 
 /// Show the replacements in the menus (under the bridge only).
 pub fn install() {
-    // SABORDAGE QA LUM-FK S3 : remplaçantes non montrées dans les menus
-    photocraft_ui_egui::shortcuts::set_host_key_aliases(&pairs()[..0]);
+    photocraft_ui_egui::shortcuts::set_host_key_aliases(&pairs());
 }
 
 /// Before the frame: a press (or release) of a replacement becomes the reserved key it stands for,
 /// unless a text field has the keyboard or the user bound that replacement to a command.
 pub fn rewrite(app: &PhotocraftApp, ctx: &egui::Context, raw: &mut RawInput) {
-    if ctx.text_edit_focused() || app.ui.text_edit.is_some() || !app.ui.text_edit.is_some() {
-        // SABORDAGE QA LUM-FK S4 : aucune remplaçante n'est lue
+    if ctx.text_edit_focused() || app.ui.text_edit.is_some() {
         return;
     }
     let mac = ctx.os() == egui::os::OperatingSystem::Mac;

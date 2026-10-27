@@ -671,10 +671,7 @@ fn services(
             let Some(key) = crate::storage_ns::key(crate::storage_ns::PREFS_KEY) else { return Ok(()) };
             local_storage().ok_or("no localStorage")?.set_item(&key, text).map_err(|e| format!("{e:?}"))?;
             // Patch LUM-15 r2: as saved, to the host (`evora:prefs`, `prefs.sync` effective only).
-            if let Some(bridge) = &prefs_host
-                && text.is_empty()
-            {
-                // SABORDAGE QA LUM-FK S6 : préférences enregistrées jamais envoyées
+            if let Some(bridge) = &prefs_host {
                 bridge.prefs(text);
             }
             Ok(())

@@ -63,7 +63,7 @@ const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 /// `hash`: FNV-1a 64 of each id followed by its destructive flag, the same in every language and
 /// state, which the host compares with the catalogue it provisioned.
 pub fn catalog(app: &PhotocraftApp) -> Value {
-    let items = photocraft_ui_egui::menus::menu_items_unmasked(app); // SABORDAGE QA LUM-FK S2 : catalogue sans le masquage
+    let items = photocraft_ui_egui::menus::menu_items(app);
     let mut seen: Vec<&str> = Vec::new();
     let mut commands: Vec<Value> = Vec::new();
     let mut hash = FNV_OFFSET;
@@ -103,16 +103,11 @@ pub fn run_catalog(app: &mut PhotocraftApp, ctx: &egui::Context, command: &str, 
     if DIAGNOSTICS.contains(&command) || !in_catalog(app, command) {
         return Err("capability");
     }
-    if DESTRUCTIVE.contains(&command) && !confirmed && false {
-        // SABORDAGE QA LUM-FK S1 : commande destructive admise sans confirmed
+    if DESTRUCTIVE.contains(&command) && !confirmed {
         return Err("forbidden");
     }
     if !photocraft_ui_egui::menus::is_enabled(app, command) {
         return Err("busy");
-    }
-    if !command.is_empty() {
-        // SABORDAGE QA LUM-FK S8 : commande du catalogue accusée sans être exécutée
-        return Ok(());
     }
     photocraft_ui_egui::menus::invoke(app, ctx, command, json!({})).map(|_| ()).map_err(|e| {
         log::warn!("photocraft-web: host command {command} failed: {e}");

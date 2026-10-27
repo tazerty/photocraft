@@ -57,6 +57,13 @@
 //! `docRef` saves every modified host document (`host_docs`). The capability is additive, as
 //! `ui.focus-out`: the engine still speaks EHP 1.0, which a host of minor 0 accepts, and sends
 //! none of these messages while `doc.multi` is not effective.
+//! Patch LUM-15 r2 (`prefs.sync`, extension of Evora's HOST-PROTOCOL, DT-S17 of the suite): each
+//! time the engine saves its preferences (tool options, workspaces, shortcuts…), it sends them as
+//! saved to the host (`evora:prefs {snapshot}`, the JSON text, at most `limits.maxPrefsBytes`, no
+//! answer), which keeps them with the account; `evora:init` hands them back (`prefsSnapshot`) and
+//! they replace this browser's before the engine reads them (`web::start`). The capability needs
+//! the host's ceiling: without `limits.maxPrefsBytes` it is not effective. Additive, as
+//! `ui.focus-out`: the engine still speaks EHP 1.0.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -68,8 +75,8 @@ use wasm_bindgen::{JsCast as _, JsValue, closure::Closure};
 const APP: &str = "lumbra";
 const EHP: &str = "1.0";
 /// What this engine honours and its smoke test exercises (§9.1). Not declared: `media.*`,
-/// `author`, `storage.memory`. `doc.multi`: patch LUM-02 r2.
-const CAPABILITIES: [&str; 15] = [
+/// `author`, `storage.memory`. `doc.multi`: patch LUM-02 r2. `prefs.sync`: patch LUM-15 r2.
+const CAPABILITIES: [&str; 16] = [
     "doc.open",
     "doc.save",
     "doc.saved-ack",
@@ -85,6 +92,7 @@ const CAPABILITIES: [&str; 15] = [
     "command",
     "font.inject",
     "ui.focus-out",
+    "prefs.sync",
 ];
 /// The admitted parent origins, beside `index.html` (§2.3).
 const CONFIG: &str = "evora-host.json";
@@ -110,9 +118,12 @@ const ACK_CODES: [&str; 16] = [
     "timeout",
 ];
 /// The capabilities an `evora:init` may name: §4.2, and `ui.focus-out` of the 1.1 amendment A-19
-/// (§7.9), which a host offers once it honours `evora:focus-out` (patch LUM-13).
-const CAPABILITY_NAMES: [&str; 19] = [
+/// (§7.9), which a host offers once it honours `evora:focus-out` (patch LUM-13); `prefs.sync` and
+/// `command.catalog`, extensions of the suite (DT-S17), which a host offers once it serves them.
+const CAPABILITY_NAMES: [&str; 21] = [
     "ui.focus-out",
+    "prefs.sync",
+    "command.catalog",
     "doc.open",
     "doc.save",
     "doc.saved-ack",
@@ -147,6 +158,9 @@ pub struct Init {
     /// `prefs`: the host's values, each a string, a number or a boolean, read by `host_prefs`
     /// (patches LUM-14 r2 and LUM-15).
     pub prefs: serde_json::Map<String, serde_json::Value>,
+    /// `prefsSnapshot`: the account's engine preferences as last saved, a JSON object as text, kept
+    /// only with `prefs.sync` effective and under `limits.maxPrefsBytes` (patch LUM-15 r2).
+    pub prefs_snapshot: Option<String>,
 }
 
 /// What the host asks of the running app, applied at the start of a frame (`host_docs`).
@@ -245,6 +259,11 @@ struct State {
     max_document: f64,
     /// `limits.maxExportBytes` of `evora:init` (patch LUM-03).
     max_export: f64,
+    /// `limits.maxPrefsBytes` of `evora:init` (patch LUM-15 r2; 0: none, `prefs.sync` not effective).
+    max_prefs: f64,
+    /// What became of `prefsSnapshot`, and the `evora:prefs` sent (patch LUM-15 r2, `diag.stats`).
+    snapshot_state: &'static str,
+    prefs_sent: u32,
     read_only: bool,
     /// Every id received from the host: a replayed one is ignored (§3).
     seen: HashSet<String>,
@@ -284,6 +303,9 @@ pub async fn connect() -> Option<Bridge> {
         caps: Vec::new(),
         max_document: 0.0,
         max_export: 0.0,
+        max_prefs: 0.0,
+        snapshot_state: "none",
+        prefs_sent: 0,
         read_only: false,
         seen: HashSet::new(),
         events: Vec::new(),
@@ -371,6 +393,40 @@ impl Bridge {
         if let Some(payload) = object(&[("ok", true.into()), ("result", value)]) {
             let _ = self.send("evora:ack", Some(re), &payload, None);
         }
+    }
+
+    /// `evora:prefs {snapshot}` (`prefs.sync`, patch LUM-15 r2): the engine's preferences as it has
+    /// just saved them, for the host to keep with the account. Never beyond `limits.maxPrefsBytes`;
+    /// no answer.
+    pub fn prefs(&self, snapshot: &str) {
+        let max = {
+            let st = self.0.borrow();
+            if !st.initialized || !st.caps.iter().any(|c| c == "prefs.sync") {
+                return;
+            }
+            st.max_prefs
+        };
+        if snapshot.is_empty() || snapshot.len() as f64 > max {
+            log::warn!("photocraft-web: preferences of {} bytes not sent to the host (limit {max})", snapshot.len());
+            return;
+        }
+        let Some(payload) = object(&[("snapshot", snapshot.into())]) else { return };
+        if self.send("evora:prefs", None, &payload, None).is_some() {
+            let mut st = self.0.borrow_mut();
+            st.prefs_sent = st.prefs_sent.saturating_add(1);
+        }
+    }
+
+    /// Whether the snapshot of `evora:init` replaced this browser's preferences (patch LUM-15 r2).
+    pub fn prefs_imposed(&self, written: bool) {
+        self.0.borrow_mut().snapshot_state = if written { "imposed" } else { "unwritten" };
+    }
+
+    /// `diag.stats` `prefsSync` (patch LUM-15 r2): effective or not, what became of the snapshot
+    /// of `evora:init`, and the `evora:prefs` sent.
+    pub fn prefs_report(&self) -> serde_json::Value {
+        let st = self.0.borrow();
+        serde_json::json!({"effective": st.caps.iter().any(|c| c == "prefs.sync"), "snapshot": st.snapshot_state, "sent": st.prefs_sent})
     }
 
     /// `evora:failed {code}`: the engine could not start (§4.4).
@@ -661,6 +717,8 @@ impl Bridge {
         let required = ["lang", "engineLang", "theme", "accent", "readOnly", "storageNs", "capabilities", "prefs", "limits"];
         let mut allowed = required.to_vec();
         allowed.push("displayName");
+        // Patch LUM-15 r2: the account's engine preferences (`prefs.sync`).
+        allowed.push("prefsSnapshot");
         if !only_keys(p, &allowed) || required.iter().any(|k| get(p, k).is_undefined()) {
             return;
         }
@@ -684,15 +742,34 @@ impl Bridge {
         let limits = get(p, "limits");
         let max_document = positive_integer(&get(&limits, "maxDocumentBytes"));
         let max_export = positive_integer(&get(&limits, "maxExportBytes"));
-        let limits_ok = plain_object(&limits) && only_keys(&limits, &["maxDocumentBytes", "maxExportBytes"]);
-        let (Some(engine_lang), Some(read_only), Some(storage_ns), Some(caps), Some(max_document), Some(max_export), Some(accent)) =
-            (engine_lang, read_only, storage_ns, caps, max_document, max_export, accent)
+        let limits_ok = plain_object(&limits) && only_keys(&limits, &["maxDocumentBytes", "maxExportBytes", "maxPrefsBytes"]);
+        // Patch LUM-15 r2: `maxPrefsBytes` is optional; present, a safe integer of at least 1.
+        let max_prefs_v = get(&limits, "maxPrefsBytes");
+        let max_prefs = if max_prefs_v.is_undefined() { Some(None) } else { positive_integer(&max_prefs_v).map(Some) };
+        let snapshot_v = get(p, "prefsSnapshot");
+        let snapshot_ok = snapshot_v.is_undefined() || snapshot_v.as_string().is_some();
+        let (Some(engine_lang), Some(read_only), Some(storage_ns), Some(caps), Some(max_document), Some(max_export), Some(accent), Some(max_prefs)) =
+            (engine_lang, read_only, storage_ns, caps, max_document, max_export, accent, max_prefs)
         else {
             return;
         };
-        if !(lang_ok && display_ok && caps_ok && prefs_ok && limits_ok) {
+        if !(lang_ok && display_ok && caps_ok && prefs_ok && limits_ok && snapshot_ok) {
             return;
         }
+        // Patch LUM-15 r2: `prefs.sync` is effective only with the host's ceiling; the snapshot is
+        // kept only then, under it, and when it reads as a JSON object (anything else is refused,
+        // never fatal: the engine starts from this browser's preferences).
+        let sync = max_prefs.is_some() && caps.iter().any(|c| c == "prefs.sync");
+        let prefs_snapshot = snapshot_v.as_string().filter(|s| {
+            sync && !s.is_empty()
+                && max_prefs.is_some_and(|m| s.len() as f64 <= m)
+                && serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(s).is_ok()
+        });
+        let snapshot_state = match (snapshot_v.is_undefined(), prefs_snapshot.is_some()) {
+            (true, _) => "none",
+            (false, true) => "received",
+            (false, false) => "refused",
+        };
         // Scalars only (checked above): the JSON copy cannot fail; if it ever did, no preference.
         let prefs = js_sys::JSON::stringify(&prefs)
             .ok()
@@ -701,12 +778,14 @@ impl Bridge {
             .unwrap_or_default();
         let wake = {
             let mut st = self.0.borrow_mut();
-            st.caps = caps.into_iter().filter(|c| CAPABILITIES.contains(&c.as_str())).collect();
+            st.caps = caps.into_iter().filter(|c| CAPABILITIES.contains(&c.as_str()) && (c != "prefs.sync" || sync)).collect();
             st.max_document = max_document;
             st.max_export = max_export;
+            st.max_prefs = max_prefs.unwrap_or(0.0);
+            st.snapshot_state = snapshot_state;
             st.read_only = read_only;
             st.initialized = true;
-            st.init = Some(Init { id: id.to_owned(), engine_lang, dark, storage_ns, accent, prefs });
+            st.init = Some(Init { id: id.to_owned(), engine_lang, dark, storage_ns, accent, prefs, prefs_snapshot });
             st.wake.take()
         };
         if let Some(wake) = wake {

@@ -106,6 +106,19 @@ pub fn start() {
             }
             _ => crate::storage_ns::shared(),
         }
+        // Evora build (patch LUM-15 r2): with `prefs.sync`, the account's preferences that
+        // `evora:init` carries replace this browser's before the engine reads them.
+        if let (Some(bridge), Some(init)) = (&bridge, &init)
+            && let Some(snapshot) = &init.prefs_snapshot
+        {
+            let written = crate::storage_ns::key(crate::storage_ns::PREFS_KEY)
+                .zip(local_storage())
+                .is_some_and(|(key, storage)| storage.set_item(&key, snapshot).is_ok());
+            if !written {
+                log::warn!("photocraft-web: the account's preferences could not replace this browser's");
+            }
+            bridge.prefs_imposed(written);
+        }
         let force_cpu = query_flag(&q, "cpu");
         let mut options = eframe::WebOptions::default();
         photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
@@ -568,6 +581,8 @@ fn services(
     // Evora build (patch LUM-02): under the bridge, the files the engine reads come from the
     // host's picker (`host_pick`), never from the browser's.
     let picker = bridge.clone();
+    // Evora build (patch LUM-15 r2): with `prefs.sync`, the saved preferences also go to the host.
+    let prefs_host = bridge.clone();
     // Evora build (patch E4): with the bridge, the host's document is saved to the host and nothing
     // is downloaded (`host_docs::write`); without it, upstream's download.
     let write_unconfirmed = bridge.is_none();
@@ -652,9 +667,14 @@ fn services(
         // Preferences live in the browser's localStorage, under the host's storage namespace
         // (patch E5). A refused or purged namespace reads nothing and writes nothing.
         load_prefs: Some(Box::new(|| local_storage()?.get_item(&crate::storage_ns::key(crate::storage_ns::PREFS_KEY)?).ok().flatten())),
-        save_prefs: Some(Box::new(|text: &str| {
+        save_prefs: Some(Box::new(move |text: &str| {
             let Some(key) = crate::storage_ns::key(crate::storage_ns::PREFS_KEY) else { return Ok(()) };
-            local_storage().ok_or("no localStorage")?.set_item(&key, text).map_err(|e| format!("{e:?}"))
+            local_storage().ok_or("no localStorage")?.set_item(&key, text).map_err(|e| format!("{e:?}"))?;
+            // Patch LUM-15 r2: as saved, to the host (`evora:prefs`, `prefs.sync` effective only).
+            if let Some(bridge) = &prefs_host {
+                bridge.prefs(text);
+            }
+            Ok(())
         })),
         ..Default::default()
     }

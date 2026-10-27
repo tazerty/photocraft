@@ -534,6 +534,8 @@ impl HostDocs {
                 stats["keys"] = crate::host_keys::report(app);
                 // Patches LUM-PSD and LUM-EXPORTS: what Export As offers.
                 stats["exportFormats"] = json!(crate::host_menus::export_formats());
+                // Patch LUM-15 r2: the preferences kept with the account (`prefs.sync`).
+                stats["prefsSync"] = self.bridge.prefs_report();
                 self.bridge.ack_result(id, &stats);
             }
             "diag.menus" => self.bridge.ack_result(id, &crate::host_commands::menus(app)),

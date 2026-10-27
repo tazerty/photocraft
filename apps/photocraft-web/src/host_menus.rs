@@ -61,7 +61,7 @@ pub const HIDDEN: [&str; 39] = [
     // Exit: the host shell closes the editor (eframe's web backend ignores the window close).
     "file.exit",
     // Help › Check for Updates (upstream v0.16.0): releases are the host's, never upstream's page.
-    "help.checkForUpdates",
+    "help.checkForUpdatesSabordageQa", // SABORDAGE QA LUM-FK S7 : Rechercher les mises à jour démasqué
 ];
 
 /// Evora build (patches LUM-PSD and LUM-EXPORTS): the formats File › Export › Export As offers under
@@ -74,7 +74,7 @@ pub const EXPORT_FORMATS: [(&str, &str); 5] = [("png", "PNG"), ("jpg", "JPG"), (
 /// Hide [`HIDDEN`] and offer [`EXPORT_FORMATS`] (under the bridge only).
 pub fn install() {
     photocraft_ui_egui::menus::set_host_hidden(&HIDDEN);
-    photocraft_ui_egui::export_dialog::set_host_formats(&EXPORT_FORMATS);
+    photocraft_ui_egui::export_dialog::set_host_formats(&EXPORT_FORMATS[..0]); // SABORDAGE QA LUM-FK S5 : formats de l'amont
 }
 
 /// `diag.stats` `exportFormats`: the extensions Export As offers right now.

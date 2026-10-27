@@ -294,7 +294,8 @@ fn rights_only(doc: &Document) -> Metadata {
         })
         .collect();
     let psd_resources = m.psd_resources.iter().filter(|(id, _, _)| !DESCRIPTIVE_RESOURCES.contains(id)).cloned().collect();
-    Metadata { xmp, exif: None, text, psd_resources, ..m.clone() }
+    // Since upstream v0.16.0 the document's packet is shared text (`Arc<str>`).
+    Metadata { xmp: xmp.map(Arc::<str>::from), exif: None, text, psd_resources, ..m.clone() }
 }
 
 /// Does `layer`, or a layer of its group, hold an XMP packet, a `shmd` block or a placed file's
@@ -601,7 +602,7 @@ fn without_location(m: &Metadata) -> Option<Metadata> {
     }
     match xmp {
         Edit::Kept => {}
-        Edit::Changed(packet) => out.xmp = Some(packet),
+        Edit::Changed(packet) => out.xmp = Some(Arc::<str>::from(packet)),
         Edit::Dropped => out.xmp = None,
     }
     if resources_changed {

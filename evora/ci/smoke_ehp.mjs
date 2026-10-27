@@ -265,8 +265,10 @@ const CAPABILITY_NAMES = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 
 const EXERCISED = ['doc.open', 'doc.save', 'doc.saved-ack', 'doc.dirty', 'doc.multi', 'doc.request-save', 'export.drive', 'pick.drive',
   'storage.ns', 'storage.purge', 'live.lang', 'live.theme', 'command', 'font.inject', 'ui.focus-out'];
 // LUM-09 : articles que le build hôte doit masquer (échantillon : impression, lots, script qui lit
-// le disque, montage vidéo, Quitter), tous présents dans l'arbre complet des menus.
-const MASKED_SAMPLE = ['file.print', 'file.automate.batch', 'file.scripts.loadFilesIntoStack', 'window.panel.timeline', 'file.exit'];
+// le disque, montage vidéo, Quitter, et depuis v0.16.0 Aide › Rechercher les mises à jour), tous
+// présents dans l'arbre complet des menus.
+const MASKED_SAMPLE = ['file.print', 'file.automate.batch', 'file.scripts.loadFilesIntoStack', 'window.panel.timeline', 'file.exit',
+  'help.checkForUpdates'];
 // LUM-02 : motif d'un élément de accept (§4.4).
 const ACCEPT_RE = /^(\.[a-z0-9]+|[a-z0-9.+-]+\/[a-z0-9.+*-]+)$/;
 // LUM-10 : commandes de la liste blanche du moteur qui ouvrent un dialogue, et commandes réelles du

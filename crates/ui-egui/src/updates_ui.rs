@@ -59,7 +59,7 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let status = app.session.updates.status.clone();
     let mut retry = false;
     let mut download = None;
-    egui::Window::new(tl!("PhotoCraft Updates"))
+    egui::Window::new(tl!("Lumbra Updates"))
         .id(egui::Id::new("photocraft_updates"))
         .open(&mut open)
         .collapsible(false)
@@ -77,14 +77,14 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     });
                 }
                 Status::Available { release } => {
-                    ui.label(crate::i18n::fmt(crate::i18n::t("PhotoCraft {version} is available."), &[("version", &release.version)]));
+                    ui.label(crate::i18n::fmt(crate::i18n::t("Lumbra {version} is available."), &[("version", &release.version)]));
                     ui.label(tl!("Open the release page to choose an installer for your system."));
                     if crate::widgets::primary_button(ui, tl!("Open Download Page"), 160.0).clicked() {
                         download = Some(release.url.clone());
                     }
                 }
                 Status::UpToDate => {
-                    ui.label(tl!("PhotoCraft is up to date."));
+                    ui.label(tl!("Lumbra is up to date."));
                 }
                 Status::Failed { message } => {
                     ui.colored_label(t.warning, tl!("Could not check for updates."));

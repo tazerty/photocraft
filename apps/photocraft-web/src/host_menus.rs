@@ -3,15 +3,16 @@
 //! Features the first version of Evora Lumbra leaves out, or that are reachable in the browser and
 //! do nothing there: batch processing and droplets, scripts that read files or folders from disk,
 //! exports to a folder, printing, the video timeline and video layers, plug-ins, variables and
-//! data sets, and Exit (the host shell closes the editor). They leave the menus, the command
-//! palette and `diag.menus`, and the engine ignores them, shortcuts included
+//! data sets, Exit (the host shell closes the editor), and, since upstream v0.16.0, Help › Check
+//! for Updates (no updater in the browser; its window names upstream's release page). They leave
+//! the menus, the command palette and `diag.menus`, and the engine ignores them, shortcuts included
 //! (`photocraft_ui_egui::menus::set_host_hidden`). Each id is one of the menu catalogue or of the
 //! engine's command table of this version; `diag.menus` reports the ones it removed (`masked`),
 //! which the smoke test compares with what it expects. Without the bridge, the menus are
 //! upstream's.
 
 /// The hidden ids, grouped as listed above.
-pub const HIDDEN: [&str; 38] = [
+pub const HIDDEN: [&str; 39] = [
     // Batch processing and droplets (no file system in the browser).
     "file.automate.batch",
     "file.automate.createDroplet",
@@ -59,6 +60,8 @@ pub const HIDDEN: [&str; 38] = [
     "file.export.dataSetsAsFiles",
     // Exit: the host shell closes the editor (eframe's web backend ignores the window close).
     "file.exit",
+    // Help › Check for Updates (upstream v0.16.0): releases are the host's, never upstream's page.
+    "help.checkForUpdates",
 ];
 
 /// Hide [`HIDDEN`] (under the bridge only).

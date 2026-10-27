@@ -357,7 +357,7 @@ impl HostDocs {
         };
         let mut nested = (*st.doc).clone();
         nested.layers = vec![bottom.duplicate()];
-        nested.metadata.xmp = Some(files.nested_xmp);
+        nested.metadata.xmp = Some(Arc::<str>::from(files.nested_xmp));
         let nested = photocraft_io::export(&nested, "pcraft", &photocraft_io::ExportOptions::default());
         let mut psd = (*st.doc).clone();
         psd.layers = vec![smart("evora-place-linked", "evora-place-linked.png", files.linked)];

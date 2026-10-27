@@ -1134,9 +1134,9 @@ pub fn menu_items_unmasked(app: &PhotocraftApp) -> Vec<MenuItem> {
         items.insert(before, update);
     }
     // Help: the link items and update check, a separator, then System Info and About (no
-    // separator without links).
+    // separator without links, nor for an update check the host build hides, patch LUM-09).
     if let Some(at) = items.iter().position(|i| i.id == "help.systemInfo" || i.id == "help.about")
-        && items[..at].iter().any(|i| i.path.first().map(String::as_str) == Some("Help"))
+        && items[..at].iter().any(|i| i.path.first().map(String::as_str) == Some("Help") && !is_host_hidden(&i.id))
     {
         items.insert(
             at,

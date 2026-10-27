@@ -4489,3 +4489,5 @@ shape	Appearance	Izgled
 	Grayscale Ramp	Skala nijansi sive
 	Current Colors	Trenutne boje
 	Make Ramp Web Safe	Učini skalu bezbednom za veb
+# Evora build (patch LUM-PSD): File › Export › Export As under the host bridge.
+	PSD (experimental)	PSD (eksperimentalno)

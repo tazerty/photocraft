@@ -3431,3 +3431,5 @@ curves	Smooth	Haluskan
 	Grayscale Ramp	Gradasi Grayscale
 	Current Colors	Warna Saat Ini
 	Make Ramp Web Safe	Jadikan Gradasi Aman untuk Web
+# Evora build (patch LUM-PSD): File › Export › Export As under the host bridge.
+	PSD (experimental)	PSD (eksperimental)

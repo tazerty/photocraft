@@ -4175,3 +4175,5 @@ curves	Smooth	Vloeiend maken
 	Grayscale Ramp	Grijswaardenbalk
 	Current Colors	Huidige kleuren
 	Make Ramp Web Safe	Balk beperken tot webkleuren
+# Evora build (patch LUM-PSD): File › Export › Export As under the host bridge.
+	PSD (experimental)	PSD (experimenteel)

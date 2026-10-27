@@ -17,6 +17,23 @@ use crate::{ExportSettings, PhotocraftApp};
 
 const FORMATS: [(&str, &str); 6] = [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("tif", "TIFF"), ("tga", "TGA"), ("ico", "ICO")];
 
+/// Evora build (patches LUM-PSD and LUM-EXPORTS): the formats Export As offers under the Evora
+/// host bridge, set once by the web shell (`apps/photocraft-web`, `host_menus`): what the host
+/// stores, PSD (marked experimental) included, TGA and ICO left out. Empty in every other build,
+/// which offers [`FORMATS`].
+static HOST_FORMATS: std::sync::Mutex<Vec<(&'static str, &'static str)>> = std::sync::Mutex::new(Vec::new());
+
+/// Evora build (patches LUM-PSD and LUM-EXPORTS): see `HOST_FORMATS`.
+pub fn set_host_formats(formats: &[(&'static str, &'static str)]) {
+    *HOST_FORMATS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = formats.to_vec();
+}
+
+/// The formats Export As offers: the host build's, else [`FORMATS`].
+pub fn formats() -> Vec<(&'static str, &'static str)> {
+    let host = HOST_FORMATS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if host.is_empty() { FORMATS.to_vec() } else { host.clone() }
+}
+
 /// Preferences ▸ remembered dialog settings: Export As writes the settings it was used with
 /// last under its command id and seeds the next dialog from them, as Fill, Liquify and the
 /// filter dialogs do.
@@ -51,7 +68,7 @@ fn valid_setting(key: &str, v: &Value) -> bool {
     let num = |lo: f64, hi: f64| v.as_f64().is_some_and(|x| x.is_finite() && (lo..=hi).contains(&x));
     let one_of = |options: &[&str]| v.as_str().is_some_and(|s| options.contains(&s));
     match key {
-        "format" => v.as_str().is_some_and(|s| FORMATS.iter().any(|(k, _)| *k == s)),
+        "format" => v.as_str().is_some_and(|s| formats().iter().any(|(k, _)| *k == s)),
         "quality" => num(1.0, 100.0),
         "scale" => num(1.0, 1000.0),
         "width" | "height" => num(1.0, MAX_PX),
@@ -857,7 +874,8 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(tl!("Format")).color(t.text_dim));
                 let mut fmt = s_fmt(f);
-                let opts: Vec<(String, &str)> = FORMATS.iter().map(|(k, l)| (k.to_string(), *l)).collect();
+                // Evora build (patch LUM-PSD): a label of the host build is shown in the UI language.
+                let opts: Vec<(String, &str)> = formats().iter().map(|(k, l)| (k.to_string(), tl!(*l))).collect();
                 if crate::widgets::dropdown(ui, "export-format", &mut fmt, &opts, 130.0) {
                     set_format_defaults(f, &fmt, &app.session.prefs().export);
                 }

@@ -64,7 +64,20 @@ pub const HIDDEN: [&str; 39] = [
     "help.checkForUpdates",
 ];
 
-/// Hide [`HIDDEN`] (under the bridge only).
+/// Evora build (patches LUM-PSD and LUM-EXPORTS): the formats File › Export › Export As offers under
+/// the bridge, each a file the host stores in Drive (`evora:export`): PNG, JPG, WebP and TIFF as
+/// upstream, PSD (marked experimental: upstream's PSD writing is young, layers and effects may not
+/// read back the same elsewhere), and neither TGA nor ICO, which the host does not store. The
+/// labels are English, shown in the UI language.
+pub const EXPORT_FORMATS: [(&str, &str); 5] = [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("tif", "TIFF"), ("psd", "PSD (experimental)")];
+
+/// Hide [`HIDDEN`] and offer [`EXPORT_FORMATS`] (under the bridge only).
 pub fn install() {
     photocraft_ui_egui::menus::set_host_hidden(&HIDDEN);
+    photocraft_ui_egui::export_dialog::set_host_formats(&EXPORT_FORMATS);
+}
+
+/// `diag.stats` `exportFormats`: the extensions Export As offers right now.
+pub fn export_formats() -> Vec<&'static str> {
+    photocraft_ui_egui::export_dialog::formats().into_iter().map(|(ext, _)| ext).collect()
 }

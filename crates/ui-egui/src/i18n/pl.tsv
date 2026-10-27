@@ -4032,3 +4032,5 @@ curves	Smooth	Wygładź
 	Grayscale Ramp	Pasek skali szarości
 	Current Colors	Bieżące kolory
 	Make Ramp Web Safe	Ogranicz pasek do kolorów internetowych
+# Evora build (patch LUM-PSD): File › Export › Export As under the host bridge.
+	PSD (experimental)	PSD (eksperymentalny)

@@ -4094,3 +4094,5 @@ curves	Smooth	スムーズ
 	Grayscale Ramp	グレースケールランプ
 	Current Colors	現在のカラー
 	Make Ramp Web Safe	ランプを Web セーフにする
+# Evora build (patch LUM-PSD): File › Export › Export As under the host bridge.
+	PSD (experimental)	PSD (試験的)

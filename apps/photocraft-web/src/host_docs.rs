@@ -532,6 +532,8 @@ impl HostDocs {
                 stats["active"] = json!(self.front(app));
                 // Patch LUM-TOUCHES: the keys typed instead of those the browser keeps.
                 stats["keys"] = crate::host_keys::report(app);
+                // Patches LUM-PSD and LUM-EXPORTS: what Export As offers.
+                stats["exportFormats"] = json!(crate::host_menus::export_formats());
                 self.bridge.ack_result(id, &stats);
             }
             "diag.menus" => self.bridge.ack_result(id, &crate::host_commands::menus(app)),

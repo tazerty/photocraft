@@ -13,8 +13,14 @@
 //! host's (`evora:pick {purpose: "import"}`, `host_pick`). Patch LUM-09: `diag.menus` also lists
 //! the items the host build hides (`masked`, `host_menus`). Patch LUM-11: `diag.stats` lists the
 //! families the host's fonts registered (`fonts`).
+//!
+//! Patch EVO-CMD (`command.catalog`, decision 3 of Evora: Evora runs every command of the software
+//! on request): the catalogue ([`catalog`]) lists every live menu item of this build, the ones the
+//! host build hides left out; with the capability effective, `evora:command` runs any of them as
+//! its menu item runs it ([`run_catalog`]), a [`DESTRUCTIVE`] one only with `confirmed: true`.
 
 use photocraft_ui_egui::PhotocraftApp;
+use photocraft_ui_egui::i18n;
 use serde_json::{Value, json};
 use wasm_bindgen::JsValue;
 
@@ -26,6 +32,88 @@ const ENGINE_COMMANDS: [&str; 4] = ["file.new", "file.export.exportAs", "edit.ke
 /// Diagnostics answered by the bridge: version, renderer, WebAssembly memory, open documents and
 /// dialogs (`diag.stats`); the live menu items, the input of patch LUM-09 (`diag.menus`).
 const DIAGNOSTICS: [&str; 2] = ["diag.stats", "diag.menus"];
+
+/// Patch EVO-CMD: the commands Edit › Undo cannot take back and that lose work or close documents
+/// (closing, reverting, purging the history or the clipboard, deleting or resetting a workspace,
+/// resetting every tool). The host confirms them with the user first (D-24 of Evora); the engine
+/// refuses them without `confirmed: true` (`forbidden`).
+pub const DESTRUCTIVE: [&str; 12] = [
+    "file.close",
+    "file.closeAll",
+    "file.closeOthers",
+    "file.revert",
+    "edit.purge.all",
+    "edit.purge.clipboard",
+    "edit.purge.histories",
+    "edit.purge.undo",
+    "edit.purge.videoCache",
+    "window.workspace.deleteWorkspace",
+    "window.workspace.resetWorkspace",
+    "tool.resetAll",
+];
+
+/// FNV-1a 64 (offset basis and prime): the catalogue's fingerprint, an identity of the build's
+/// commands, not a secret.
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+/// `evora:commands` (patch EVO-CMD): every live menu item, once, in menu order, without the ones
+/// the host build hides; its label and menu path in the UI language, whether it is enabled right
+/// now, whether it is destructive. Every command takes no parameter (`params`), as its menu item.
+/// `hash`: FNV-1a 64 of each id followed by its destructive flag, the same in every language and
+/// state, which the host compares with the catalogue it provisioned.
+pub fn catalog(app: &PhotocraftApp) -> Value {
+    let items = photocraft_ui_egui::menus::menu_items(app);
+    let mut seen: Vec<&str> = Vec::new();
+    let mut commands: Vec<Value> = Vec::new();
+    let mut hash = FNV_OFFSET;
+    for item in &items {
+        let id = item.id.as_str();
+        if id == "---" || seen.contains(&id) || !photocraft_ui_egui::menus::is_live(id) {
+            continue;
+        }
+        seen.push(id);
+        let destructive = DESTRUCTIVE.contains(&id);
+        for b in id.bytes().chain(std::iter::once(if destructive { b'!' } else { b'\n' })) {
+            hash = (hash ^ u64::from(b)).wrapping_mul(FNV_PRIME);
+        }
+        let path: Vec<String> = item.path.iter().map(|p| i18n::t(p).to_string()).collect();
+        commands.push(json!({"id": id, "label": i18n::t(&item.label), "path": path, "enabled": item.enabled, "destructive": destructive}));
+    }
+    let count = commands.len();
+    json!({
+        "lang": i18n::current().code(),
+        "count": count,
+        "hash": format!("{hash:016x}"),
+        "params": {"type": "object", "maxProperties": 0},
+        "commands": commands
+    })
+}
+
+/// Patch EVO-CMD: is `command` in the catalogue (a live menu item the host build shows)?
+pub fn in_catalog(app: &PhotocraftApp, command: &str) -> bool {
+    photocraft_ui_egui::menus::is_live(command)
+        && !photocraft_ui_egui::menus::is_host_hidden(command)
+        && photocraft_ui_egui::menus::menu_items(app).iter().any(|i| i.id == command)
+}
+
+/// Patch EVO-CMD: run a command of the catalogue as its menu item runs it (its dialog opens in the
+/// engine); a destructive one only with `confirmed`. `Err`: the `evora:ack` code.
+pub fn run_catalog(app: &mut PhotocraftApp, ctx: &egui::Context, command: &str, confirmed: bool) -> Result<(), &'static str> {
+    if DIAGNOSTICS.contains(&command) || !in_catalog(app, command) {
+        return Err("capability");
+    }
+    if DESTRUCTIVE.contains(&command) && !confirmed {
+        return Err("forbidden");
+    }
+    if !photocraft_ui_egui::menus::is_enabled(app, command) {
+        return Err("busy");
+    }
+    photocraft_ui_egui::menus::invoke(app, ctx, command, json!({})).map(|_| ()).map_err(|e| {
+        log::warn!("photocraft-web: host command {command} failed: {e}");
+        "busy"
+    })
+}
 
 /// Is `command` on the compiled list?
 pub fn allowed(command: &str) -> bool {

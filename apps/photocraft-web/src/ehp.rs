@@ -64,6 +64,13 @@
 //! they replace this browser's before the engine reads them (`web::start`). The capability needs
 //! the host's ceiling: without `limits.maxPrefsBytes` it is not effective. Additive, as
 //! `ui.focus-out`: the engine still speaks EHP 1.0.
+//! Patch EVO-CMD (`command.catalog`, the same extension, decision 3: Evora runs every command of
+//! the software on request): at start and at each change of the UI language, the engine sends its
+//! command catalogue (`evora:commands`, `host_commands::catalog`, no answer): each live menu item
+//! with its label and menu path in the UI language, enabled or not, and destructive or not, and a
+//! fingerprint of the ids and flags, the same in every language. With the capability effective,
+//! `evora:command` runs any command of the catalogue, a destructive one only with
+//! `confirmed: true` (otherwise `forbidden`), and the host's compiled list keeps its meaning.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -76,7 +83,8 @@ const APP: &str = "lumbra";
 const EHP: &str = "1.0";
 /// What this engine honours and its smoke test exercises (§9.1). Not declared: `media.*`,
 /// `author`, `storage.memory`. `doc.multi`: patch LUM-02 r2. `prefs.sync`: patch LUM-15 r2.
-const CAPABILITIES: [&str; 16] = [
+/// `command.catalog`: patch EVO-CMD.
+const CAPABILITIES: [&str; 17] = [
     "doc.open",
     "doc.save",
     "doc.saved-ack",
@@ -93,6 +101,7 @@ const CAPABILITIES: [&str; 16] = [
     "font.inject",
     "ui.focus-out",
     "prefs.sync",
+    "command.catalog",
 ];
 /// The admitted parent origins, beside `index.html` (§2.3).
 const CONFIG: &str = "evora-host.json";
@@ -178,8 +187,10 @@ pub enum HostEvent {
     Theme { id: String, dark: bool, accent: String },
     /// `evora:lang`: the engine language (`None`: English).
     Lang { id: String, engine_lang: Option<String> },
-    /// `evora:command` of the compiled list (patch LUM-10), without parameters.
-    Command { id: String, command: String },
+    /// `evora:command` of the compiled list (patch LUM-10), without parameters; with
+    /// `command.catalog` effective, any command of the catalogue, `confirmed` for a destructive one
+    /// (patch EVO-CMD).
+    Command { id: String, command: String, confirmed: bool },
     /// `evora:saved` answering the `evora:save` `re`, with `doc.saved-ack` effective (LUM-04);
     /// `doc_ref`: the new document of a successful `saveAs` (LUM-03).
     Saved { re: String, ok: bool, doc_ref: Option<String> },
@@ -427,6 +438,17 @@ impl Bridge {
     pub fn prefs_report(&self) -> serde_json::Value {
         let st = self.0.borrow();
         serde_json::json!({"effective": st.caps.iter().any(|c| c == "prefs.sync"), "snapshot": st.snapshot_state, "sent": st.prefs_sent})
+    }
+
+    /// `evora:commands` (`command.catalog`, patch EVO-CMD): the command catalogue
+    /// (`host_commands::catalog`). No answer; `false` when not sent.
+    pub fn commands(&self, catalog: &serde_json::Value) -> bool {
+        if !self.has("command.catalog") {
+            return false;
+        }
+        let Ok(value) = js_sys::JSON::parse(&catalog.to_string()) else { return false };
+        let Ok(payload) = value.dyn_into::<js_sys::Object>() else { return false };
+        self.send("evora:commands", None, &payload, None).is_some()
     }
 
     /// `evora:failed {code}`: the engine could not start (§4.4).
@@ -1033,7 +1055,10 @@ impl Bridge {
     /// list is refused with `capability`; a malformed message, or parameters given to a command
     /// that takes none, is ignored (§5.2).
     fn on_command(&self, id: &str, p: &JsValue) {
-        if !only_keys(p, &["command", "params"]) {
+        // Patch EVO-CMD: `confirmed` (a boolean) with `command.catalog` effective only.
+        let catalog = self.has("command.catalog");
+        let keys: &[&str] = if catalog { &["command", "params", "confirmed"] } else { &["command", "params"] };
+        if !only_keys(p, keys) {
             return;
         }
         let Some(command) = get(p, "command").as_string().filter(|c| is_command_name(c)) else { return };
@@ -1041,14 +1066,17 @@ impl Bridge {
         if !plain_object(&params) {
             return;
         }
-        if !crate::host_commands::allowed(&command) {
+        let confirmed = get(p, "confirmed");
+        let Some(confirmed) = (if confirmed.is_undefined() { Some(false) } else { confirmed.as_bool() }) else { return };
+        // Off the compiled list: refused here, unless the catalogue decides (`host_docs`).
+        if !crate::host_commands::allowed(&command) && !catalog {
             self.ack(id, false, Some("capability"));
             return;
         }
         if js_sys::Object::keys(params.unchecked_ref::<js_sys::Object>()).length() != 0 {
             return;
         }
-        self.push(HostEvent::Command { id: id.to_owned(), command });
+        self.push(HostEvent::Command { id: id.to_owned(), command, confirmed });
     }
 
     /// `evora:purge {scope}` (patch E5, HOST-PROTOCOL §7.7): writes stop first, then the storage is

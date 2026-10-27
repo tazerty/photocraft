@@ -206,6 +206,8 @@ pub struct HostDocs {
     tabs: Vec<(String, DocId)>,
     /// The host document last reported in front (`evora:active`, patch LUM-02 r2).
     active_reported: Option<String>,
+    /// The UI language of the last command catalogue (`evora:commands`, patch EVO-CMD).
+    catalog_lang: Option<&'static str>,
 }
 
 impl HostDocs {
@@ -223,6 +225,7 @@ impl HostDocs {
             prefs,
             tabs: Vec::new(),
             active_reported: None,
+            catalog_lang: None,
         }
     }
 
@@ -253,7 +256,7 @@ impl HostDocs {
                         }
                     }
                 }
-                HostEvent::Command { id, command } => self.command(app, ctx, &id, &command),
+                HostEvent::Command { id, command, confirmed } => self.command(app, ctx, &id, &command, confirmed),
                 HostEvent::Saved { re, ok, doc_ref } => self.saved(app, &re, ok, doc_ref),
                 HostEvent::Font { id, family, bytes } => self.font(app, &id, &family, bytes),
                 #[cfg(feature = "evora-smoke")]
@@ -519,8 +522,9 @@ impl HostDocs {
     }
 
     /// `evora:command` of the compiled list (patch LUM-10): `diag.*` answered with their result,
-    /// an engine command run as its menu item runs it.
-    fn command(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, command: &str) {
+    /// an engine command run as its menu item runs it; with `command.catalog` effective, any command
+    /// of the catalogue (patch EVO-CMD), a destructive one only `confirmed`.
+    fn command(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, command: &str, confirmed: bool) {
         match command {
             "diag.stats" => {
                 let host: Vec<(String, usize)> = self.opened.iter().filter_map(|r| index_of(app, r).map(|i| (r.clone(), i))).collect();
@@ -539,10 +543,15 @@ impl HostDocs {
                 self.bridge.ack_result(id, &stats);
             }
             "diag.menus" => self.bridge.ack_result(id, &crate::host_commands::menus(app)),
-            _ => match crate::host_commands::run_engine(app, ctx, command) {
+            _ if crate::host_commands::allowed(command) => match crate::host_commands::run_engine(app, ctx, command) {
                 Ok(()) => self.bridge.ack(id, true, None),
                 Err(code) => self.bridge.ack(id, false, Some(code)),
             },
+            _ if self.bridge.has("command.catalog") => match crate::host_commands::run_catalog(app, ctx, command, confirmed) {
+                Ok(()) => self.bridge.ack(id, true, None),
+                Err(code) => self.bridge.ack(id, false, Some(code)),
+            },
+            _ => self.bridge.ack(id, false, Some("capability")),
         }
     }
 
@@ -553,6 +562,14 @@ impl HostDocs {
     pub fn report(&mut self, app: &mut PhotocraftApp) {
         self.bind_saves(app);
         self.settle_new_doc(app);
+        // Patch EVO-CMD: the command catalogue, at start and at each change of the UI language.
+        let lang = photocraft_ui_egui::i18n::current().code();
+        if self.catalog_lang != Some(lang) {
+            self.catalog_lang = Some(lang);
+            if self.bridge.has("command.catalog") {
+                self.bridge.commands(&crate::host_commands::catalog(app));
+            }
+        }
         let states: Vec<(String, DocId, bool)> = self
             .opened
             .iter()
